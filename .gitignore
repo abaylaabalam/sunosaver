@@ -1,0 +1,16 @@
+.env
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+bot_data.db*
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+.venv/
+.DS_Store
+*.key
+*.pem
