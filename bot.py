@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import ssl
+import tempfile
 import time
 
 import aiohttp
@@ -149,6 +150,29 @@ TEXTS = {
         "btn_about":     "ℹ️ О боте",
         "btn_channel":   "📢 Наш канал",
         "btn_go_channel":"➡️ Перейти в канал",
+        "btn_create_mix": "🎛 Создать микс",
+        "mix_menu_title": (
+            "🎛 <b>Конструктор миксов Suno</b>\n\n"
+            "Объедините несколько песен в один цельный MP3-трек!\n\n"
+            "1️⃣ Выберите треки из вашей библиотеки ниже <i>(или отправьте ссылки на треки сообщением)</i>.\n"
+            "2️⃣ Нажмите <b>«Собрать микс»</b> и выберите тип склейки (обычная или плавный DJ-микс)."
+        ),
+        "mix_empty_library": "ℹ️ В вашей библиотеке пока нет сохранённых треков. Отправьте ссылку на трек Suno прямо сейчас, чтобы добавить его в микс:",
+        "mix_current_queue": "\n\n<b>Выбрано для микса ({count}/5):</b>\n{list}",
+        "mix_btn_build": "🚀 Собрать микс ({count})",
+        "mix_btn_clear": "🗑 Очистить",
+        "mix_btn_cancel": "❌ Закрыть",
+        "mix_mode_prompt": "🎵 <b>Выберите тип сведения для микса:</b>",
+        "mix_mode_normal": "▶️ Обычная склейка (встык)",
+        "mix_mode_crossfade": "🎧 Плавный DJ-микс (Crossfade)",
+        "mix_btn_back": "⬅️ Назад",
+        "mix_processing": "⏳ Склеиваю <b>{count}</b> треков в единый микс...",
+        "mix_error": "❌ Не удалось создать микс. Попробуйте снова.",
+        "mix_min_tracks": "⚠️ Выберите хотя бы 2 трека для создания микса!",
+        "mix_max_reached": "⚠️ В микс можно добавить не более 5 треков.",
+        "mix_cancelled": "❌ Создание микса закрыто.",
+        "mix_track_added": "✅ Трек «{title}» добавлен в микс ({count}/5)!",
+        "btn_mix_these": "🎛 Склеить эти треки в микс",
     },
     "en": {
         "start": (
@@ -206,6 +230,29 @@ TEXTS = {
         "btn_about":     "ℹ️ About",
         "btn_channel":   "📢 Our Channel",
         "btn_go_channel":"➡️ Go to Channel",
+        "btn_create_mix": "🎛 Create Mix",
+        "mix_menu_title": (
+            "🎛 <b>Suno Mix Maker</b>\n\n"
+            "Combine multiple songs into one seamless MP3 track!\n\n"
+            "1️⃣ Choose tracks from your library below <i>(or send Suno links in chat)</i>.\n"
+            "2️⃣ Click <b>«Build Mix»</b> and choose transition type (Normal or DJ Crossfade)."
+        ),
+        "mix_empty_library": "ℹ️ Your library is currently empty. Send a Suno link right now to add it to the mix:",
+        "mix_current_queue": "\n\n<b>Selected for mix ({count}/5):</b>\n{list}",
+        "mix_btn_build": "🚀 Build Mix ({count})",
+        "mix_btn_clear": "🗑 Clear",
+        "mix_btn_cancel": "❌ Close",
+        "mix_mode_prompt": "🎵 <b>Choose transition mode for your mix:</b>",
+        "mix_mode_normal": "▶️ Normal (Gapless)",
+        "mix_mode_crossfade": "🎧 Smooth DJ Crossfade",
+        "mix_btn_back": "⬅️ Back",
+        "mix_processing": "⏳ Stitching <b>{count}</b> tracks into a single mix...",
+        "mix_error": "❌ Could not create mix. Please try again.",
+        "mix_min_tracks": "⚠️ You need at least 2 tracks to create a mix!",
+        "mix_max_reached": "⚠️ You can add up to 5 tracks in a single mix.",
+        "mix_cancelled": "❌ Mix builder closed.",
+        "mix_track_added": "✅ Track «{title}» added to mix ({count}/5)!",
+        "btn_mix_these": "🎛 Stitch these into a Mix",
     },
     "kk": {
         "start": (
@@ -263,6 +310,29 @@ TEXTS = {
         "btn_about":     "ℹ️ Бот туралы",
         "btn_channel":   "📢 Біздің арна",
         "btn_go_channel":"➡️ Арнаға өту",
+        "btn_create_mix": "🎛 Микс жасау",
+        "mix_menu_title": (
+            "🎛 <b>Suno Микс жасау шебері</b>\n\n"
+            "Бірнеше әнді бір тұтас MP3 трекке біріктіріңіз!\n\n"
+            "1️⃣ Төмендегі жеке кітапханаңыздан әндерді таңдаңыз <i>(немесе чатқа сілтеме жіберіңіз)</i>.\n"
+            "2️⃣ <b>«Миксті құрастыру»</b> басып, біріктіру түрін таңдаңыз (кәдімгі немесе DJ кроссфейд)."
+        ),
+        "mix_empty_library": "ℹ️ Кітапханаңызда әзірге сақталған әндер жоқ. Микске қосу үшін қазір Suno сілтемесін жіберіңіз:",
+        "mix_current_queue": "\n\n<b>Микс үшін таңдалды ({count}/5):</b>\n{list}",
+        "mix_btn_build": "🚀 Миксті құрастыру ({count})",
+        "mix_btn_clear": "🗑 Тазалау",
+        "mix_btn_cancel": "❌ Жабу",
+        "mix_mode_prompt": "🎵 <b>Миксті біріктіру түрін таңдаңыз:</b>",
+        "mix_mode_normal": "▶️ Кәдімгі (тізбекті жалғау)",
+        "mix_mode_crossfade": "🎧 Ырғақты DJ-микс (Crossfade)",
+        "mix_btn_back": "⬅️ Артқа",
+        "mix_processing": "⏳ <b>{count}</b> трек бір микске біріктірілуде...",
+        "mix_error": "❌ Миксті жасау мүмкін болмады. Қайталап көріңіз.",
+        "mix_min_tracks": "⚠️ Микс жасау үшін кемінде 2 трек таңдау қажет!",
+        "mix_max_reached": "⚠️ Бір микске ең көбі 5 трек қосуға болады.",
+        "mix_cancelled": "❌ Микс шебері жабылды.",
+        "mix_track_added": "✅ «{title}» трегі микске қосылды ({count}/5)!",
+        "btn_mix_these": "🎛 Осы тректерден микс жасау",
     },
 }
 
@@ -371,6 +441,7 @@ def get_main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
     t = TEXTS[lang]
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text=t["btn_create_mix"])],
             [KeyboardButton(text=t["btn_how_to"]),  KeyboardButton(text=t["btn_settings"])],
             [KeyboardButton(text=t["btn_about"]),    KeyboardButton(text=t["btn_channel"])],
         ],
@@ -681,6 +752,7 @@ async def _download_and_send(
                     parse_mode="HTML",
                 )
                 await database.increment_total_downloads()
+                await database.save_user_track(message.from_user.id, song_id, safe_title)
                 return True
             except Exception as e:
                 logger.warning("Кэшированный file_id устарел, перекачиваем: %s", e)
@@ -738,6 +810,7 @@ async def _download_and_send(
                 await database.save_track_cache(song_id, sent_msg.audio.file_id, safe_title, lyrics)
             if original_song_id and original_song_id != song_id:
                 await database.save_track_cache(original_song_id, sent_msg.audio.file_id, safe_title, lyrics)
+            await database.save_user_track(message.from_user.id, song_id or original_song_id, safe_title)
 
         delete_status = True
         return True
@@ -974,6 +1047,373 @@ async def handle_lyrics_callback(callback: CallbackQuery):
         msg_text = msg_text[:3950] + "...\n</blockquote>"
 
     await callback.message.reply(msg_text, parse_mode="HTML")
+
+
+# ─── Конструктор миксов (Suno Mix Maker) ───────────────────────────────────────
+
+_user_mix_queues: dict[int, list[dict]] = {}
+
+
+async def render_mix_view(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup]:
+    """Генерирует текст и инлайн-клавиатуру конструктора миксов."""
+    t = TEXTS[lang]
+    queue = _user_mix_queues.get(user_id, [])
+    recent_tracks = await database.get_user_recent_tracks(user_id, limit=8)
+
+    text = t["mix_menu_title"]
+
+    if queue:
+        items_str = "\n".join(f"{i+1}. 🎵 <b>{html.escape(item['title'])}</b>" for i, item in enumerate(queue))
+        text += t["mix_current_queue"].format(count=len(queue), list=items_str)
+    elif not recent_tracks:
+        text += "\n\n" + t["mix_empty_library"]
+
+    keyboard_rows: list[list[InlineKeyboardButton]] = []
+
+    # Кнопки для каждого трека из недавней библиотеки пользователя
+    queue_song_ids = {item["song_id"] for item in queue}
+    for s_id, s_title in recent_tracks:
+        is_selected = s_id in queue_song_ids
+        mark = "✅" if is_selected else "➕"
+        btn_text = f"{mark} {s_title[:24]}"
+        keyboard_rows.append([
+            InlineKeyboardButton(text=btn_text, callback_data=f"mix_toggle:{s_id}")
+        ])
+
+    # Кнопки управления
+    ctrl_row: list[InlineKeyboardButton] = []
+    if len(queue) >= 2:
+        ctrl_row.append(InlineKeyboardButton(text=t["mix_btn_build"].format(count=len(queue)), callback_data="mix_build"))
+    if queue:
+        ctrl_row.append(InlineKeyboardButton(text=t["mix_btn_clear"], callback_data="mix_clear"))
+    ctrl_row.append(InlineKeyboardButton(text=t["mix_btn_cancel"], callback_data="mix_cancel"))
+    keyboard_rows.append(ctrl_row)
+
+    return text, InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+
+async def get_track_audio_bytes(song_id: str) -> tuple[bytes | None, str]:
+    """Получает MP3 байты трека (из кэша Telegram или скачивает с Suno)."""
+    title = "Suno Track"
+    cached = await database.get_cached_track(song_id)
+    if cached:
+        fid, cached_title, _ = cached
+        if cached_title:
+            title = cached_title
+        if fid:
+            try:
+                tg_file = await bot.get_file(fid)
+                dest = io.BytesIO()
+                await bot.download_file(tg_file.file_path, destination=dest)
+                data = dest.getvalue()
+                if is_valid_mp3(data):
+                    return data, title
+            except Exception as e:
+                logger.warning("Не удалось скачать MP3 из кэша Telegram: %s", e)
+
+    # Если в Telegram нет, пробуем прямое скачивание с Suno
+    raw_audio, extracted_title, _, _ = await download_direct_from_suno(f"https://suno.com/song/{song_id}", HTTP_SESSION)
+    if raw_audio and is_valid_mp3(raw_audio):
+        return raw_audio, extracted_title or title
+
+    # Резервный способ через sunodownload.io
+    fallback_raw, fb_title = await convert_and_download_mp3(f"https://suno.com/song/{song_id}", HTTP_SESSION)
+    if fallback_raw and is_valid_mp3(fallback_raw):
+        return fallback_raw, fb_title or title
+
+    return None, title
+
+
+async def concatenate_tracks(
+    audio_tracks: list[tuple[bytes, str]],
+    mode: str = "normal",
+) -> tuple[bytes | None, str]:
+    """Склеивает аудиофайлы через ffmpeg.
+    mode='normal': обычная последовательная склейка встык.
+    mode='crossfade': плавный DJ-микс с наложением 3 секунды.
+    Возвращает (mp3_bytes, tracklist_text)."""
+    if len(audio_tracks) < 2:
+        return None, ""
+
+    loop = asyncio.get_running_loop()
+
+    def _sync_ffmpeg():
+        with tempfile.TemporaryDirectory() as td:
+            input_files = []
+            durations = []
+            for i, (audio_bytes, _) in enumerate(audio_tracks):
+                fp = os.path.join(td, f"track_{i}.mp3")
+                with open(fp, "wb") as f:
+                    f.write(audio_bytes)
+                input_files.append(fp)
+                try:
+                    m = MP3(fp)
+                    dur = m.info.length if m.info else 180.0
+                except Exception:
+                    dur = 180.0
+                durations.append(dur)
+
+            out_file = os.path.join(td, "mix.mp3")
+            n = len(input_files)
+
+            # Формируем треклист с точными таймкодами
+            crossfade_dur = 3.0
+            tracklist_lines = []
+            cur_time = 0.0
+            for i, (_, t_title) in enumerate(audio_tracks):
+                mins = int(cur_time // 60)
+                secs = int(cur_time % 60)
+                tracklist_lines.append(f"<b>{mins:02d}:{secs:02d}</b> — {html.escape(t_title)}")
+                if mode == "crossfade":
+                    cur_time += max(0.0, durations[i] - crossfade_dur)
+                else:
+                    cur_time += durations[i]
+            tracklist_text = "\n".join(tracklist_lines)
+
+            cmd = ["ffmpeg", "-y"]
+            for f in input_files:
+                cmd.extend(["-i", f])
+
+            if mode == "crossfade":
+                filter_parts = []
+                prev_label = "[0:a]"
+                for i in range(1, n):
+                    next_input = f"[{i}:a]"
+                    out_label = "[out]" if i == n - 1 else f"[a{i}]"
+                    filter_parts.append(f"{prev_label}{next_input}acrossfade=d={crossfade_dur}:c1=tri:c2=tri{out_label}")
+                    prev_label = out_label
+                filter_str = ";".join(filter_parts)
+                cmd.extend([
+                    "-filter_complex", filter_str,
+                    "-map", "[out]",
+                    "-c:a", "libmp3lame", "-b:a", "192k",
+                    out_file
+                ])
+            else:
+                inputs_labels = "".join(f"[{i}:a]" for i in range(n))
+                cmd.extend([
+                    "-filter_complex", f"{inputs_labels}concat=n={n}:v=0:a=1[out]",
+                    "-map", "[out]",
+                    "-c:a", "libmp3lame", "-b:a", "192k",
+                    out_file
+                ])
+
+            import subprocess
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if proc.returncode == 0 and os.path.exists(out_file):
+                with open(out_file, "rb") as rf:
+                    return rf.read(), tracklist_text
+            else:
+                logger.error("FFmpeg ошибка склейки: %s", proc.stderr.decode(errors="ignore"))
+                return None, ""
+
+    try:
+        return await loop.run_in_executor(None, _sync_ffmpeg)
+    except Exception as e:
+        logger.error("Исключение при склейке треков: %s", e, exc_info=True)
+        return None, ""
+
+
+@dp.message(Command("mix"))
+@dp.message(F.text.in_([t["btn_create_mix"] for t in TEXTS.values()]))
+async def cmd_mix(message: types.Message):
+    user_id = message.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
+    if user_id not in _user_mix_queues:
+        _user_mix_queues[user_id] = []
+    text, reply_markup = await render_mix_view(user_id, lang)
+    await message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("mix_toggle:"))
+async def handle_mix_toggle(callback: CallbackQuery):
+    song_id = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS[lang]
+
+    if user_id not in _user_mix_queues:
+        _user_mix_queues[user_id] = []
+
+    queue = _user_mix_queues[user_id]
+    existing_idx = next((i for i, item in enumerate(queue) if item["song_id"] == song_id), None)
+
+    if existing_idx is not None:
+        queue.pop(existing_idx)
+    else:
+        if len(queue) >= 5:
+            await callback.answer(t["mix_max_reached"], show_alert=True)
+            return
+        # Находим название трека
+        title = "Suno Track"
+        cached = await database.get_cached_track(song_id)
+        if cached and cached[1]:
+            title = cached[1]
+        else:
+            user_tracks = await database.get_user_recent_tracks(user_id, limit=20)
+            for s_id, s_title in user_tracks:
+                if s_id == song_id:
+                    title = s_title
+                    break
+        queue.append({"song_id": song_id, "title": title})
+
+    await callback.answer()
+    text, reply_markup = await render_mix_view(user_id, lang)
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data == "mix_clear")
+async def handle_mix_clear(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    _user_mix_queues[user_id] = []
+    await callback.answer()
+    text, reply_markup = await render_mix_view(user_id, lang)
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data == "mix_cancel")
+async def handle_mix_cancel(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    _user_mix_queues.pop(user_id, None)
+    await callback.answer()
+    try:
+        await callback.message.edit_text(TEXTS[lang]["mix_cancelled"], parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data == "mix_build")
+async def handle_mix_build(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS[lang]
+    queue = _user_mix_queues.get(user_id, [])
+
+    if len(queue) < 2:
+        await callback.answer(t["mix_min_tracks"], show_alert=True)
+        return
+
+    await callback.answer()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["mix_mode_normal"], callback_data="mix_mode:normal")],
+        [InlineKeyboardButton(text=t["mix_mode_crossfade"], callback_data="mix_mode:crossfade")],
+        [InlineKeyboardButton(text=t["mix_btn_back"], callback_data="mix_back")],
+    ])
+    try:
+        await callback.message.edit_text(t["mix_mode_prompt"], reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data == "mix_back")
+async def handle_mix_back(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    await callback.answer()
+    text, reply_markup = await render_mix_view(user_id, lang)
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data.startswith("mix_mode:"))
+async def handle_mix_mode(callback: CallbackQuery):
+    mode = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS[lang]
+    queue = _user_mix_queues.get(user_id, [])
+
+    if len(queue) < 2:
+        await callback.answer(t["mix_min_tracks"], show_alert=True)
+        return
+
+    await callback.answer()
+    status_msg = await callback.message.reply(t["mix_processing"].format(count=len(queue)), parse_mode="HTML")
+
+    try:
+        # Скачиваем аудио всех треков
+        audio_tracks: list[tuple[bytes, str]] = []
+        for item in queue:
+            raw_bytes, item_title = await get_track_audio_bytes(item["song_id"])
+            if raw_bytes:
+                audio_tracks.append((raw_bytes, item_title or item["title"]))
+
+        if len(audio_tracks) < 2:
+            await status_msg.edit_text(t["mix_error"], parse_mode="HTML")
+            return
+
+        # Склеиваем треки в ffmpeg
+        mix_bytes, tracklist_text = await concatenate_tracks(audio_tracks, mode=mode)
+        if not mix_bytes:
+            await status_msg.edit_text(t["mix_error"], parse_mode="HTML")
+            return
+
+        # Прошиваем теги ID3
+        mode_label = t["mix_mode_crossfade"] if mode == "crossfade" else t["mix_mode_normal"]
+        mix_title = f"Suno Mix ({len(audio_tracks)} tracks)"
+        artist = "Suno AI (@sunosaver_bot)"
+        tagged_mix = add_id3_tags(mix_bytes, mix_title, artist)
+
+        caption = (
+            f"🎛 <b>Suno Mix ({len(audio_tracks)} {'трека' if len(audio_tracks) < 5 else 'треков'})</b>\n"
+            f"🎧 {mode_label}\n\n"
+            f"<b>Треклист:</b>\n{tracklist_text}\n\n"
+            f"⚡️ @sunosaver_bot"
+        )
+
+        audio_file = BufferedInputFile(tagged_mix, filename=f"Suno_Mix_{len(audio_tracks)}_tracks.mp3")
+        await callback.message.reply_audio(
+            audio=audio_file,
+            caption=caption,
+            title=mix_title,
+            performer=artist,
+            request_timeout=180,
+            parse_mode="HTML",
+        )
+
+        _user_mix_queues.pop(user_id, None)
+        await status_msg.delete()
+
+    except Exception as e:
+        logger.error("Ошибка при создании микса: %s", e, exc_info=True)
+        try:
+            await status_msg.edit_text(t["mix_error"], parse_mode="HTML")
+        except Exception:
+            pass
+
+
+@dp.callback_query(F.data.startswith("mix_quick:"))
+async def handle_mix_quick(callback: CallbackQuery):
+    raw_ids = callback.data.split(":", 1)[1].split(",")
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS[lang]
+
+    _user_mix_queues[user_id] = []
+    for s_id in raw_ids[:5]:
+        title = "Suno Track"
+        cached = await database.get_cached_track(s_id)
+        if cached and cached[1]:
+            title = cached[1]
+        _user_mix_queues[user_id].append({"song_id": s_id, "title": title})
+
+    await callback.answer()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["mix_mode_normal"], callback_data="mix_mode:normal")],
+        [InlineKeyboardButton(text=t["mix_mode_crossfade"], callback_data="mix_mode:crossfade")],
+        [InlineKeyboardButton(text=t["mix_btn_cancel"], callback_data="mix_cancel")],
+    ])
+    await callback.message.reply(t["mix_mode_prompt"], reply_markup=kb, parse_mode="HTML")
 
 
 # ─── Скачивание WAV (WAV Callback) ─────────────────────────────────────────────
@@ -1275,6 +1715,28 @@ async def handle_suno_link(message: types.Message):
         await message.answer(t["banned"], parse_mode="HTML")
         return
 
+    # Если пользователь сейчас в режиме создания микса, добавляем треки в очередь микса
+    if user_id in _user_mix_queues:
+        queue = _user_mix_queues[user_id]
+        added = 0
+        for url in suno_urls:
+            if len(queue) >= 5:
+                await message.answer(t["mix_max_reached"], parse_mode="HTML")
+                break
+            s_id = extract_song_id(url)
+            if s_id and not any(it["song_id"] == s_id for it in queue):
+                title = "Suno Track"
+                cached = await database.get_cached_track(s_id)
+                if cached and cached[1]:
+                    title = cached[1]
+                queue.append({"song_id": s_id, "title": title})
+                added += 1
+
+        if added > 0:
+            text, reply_markup = await render_mix_view(user_id, lang)
+            await message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
+            return
+
     # Rate limiting
     wait = check_rate_limit(user_id)
     if wait > 0:
@@ -1290,20 +1752,38 @@ async def handle_suno_link(message: types.Message):
     for idx, url in enumerate(suno_urls, 1):
         await _download_and_send(message, url, lang, t, track_num=idx, total=len(suno_urls))
 
+    # Если было прислано 2 или 3 ссылки, предлагаем сразу склеить их в микс
+    if len(suno_urls) >= 2:
+        valid_ids = [extract_song_id(u) for u in suno_urls if extract_song_id(u)]
+        if len(valid_ids) >= 2:
+            quick_ids = ",".join(valid_ids)
+            kb_mix = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=t["btn_mix_these"], callback_data=f"mix_quick:{quick_ids}")
+            ]])
+            await message.answer(f"🎛 <b>{t['btn_mix_these']}?</b>", reply_markup=kb_mix, parse_mode="HTML")
+
 
 # ─── Регистрация команд ────────────────────────────────────────────────────────
 
 async def setup_bot_commands():
     await bot.set_my_commands([
         BotCommand(command="start",    description="Restart bot"),
+        BotCommand(command="mix",      description="Create a music mix"),
         BotCommand(command="help",     description="How to download"),
         BotCommand(command="settings", description="Change language"),
     ], scope=BotCommandScopeDefault())
     await bot.set_my_commands([
         BotCommand(command="start",    description="Перезапустить бота"),
+        BotCommand(command="mix",      description="Собрать микс из песен"),
         BotCommand(command="help",     description="Инструкция"),
         BotCommand(command="settings", description="Сменить язык"),
     ], scope=BotCommandScopeDefault(), language_code="ru")
+    await bot.set_my_commands([
+        BotCommand(command="start",    description="Ботты қайта іске қосу"),
+        BotCommand(command="mix",      description="Әндерден микс жасау"),
+        BotCommand(command="help",     description="Нұсқаулық"),
+        BotCommand(command="settings", description="Тілді өзгерту"),
+    ], scope=BotCommandScopeDefault(), language_code="kk")
 
 
 # ─── Точка входа ───────────────────────────────────────────────────────────────

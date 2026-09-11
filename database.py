@@ -37,6 +37,18 @@ async def init_db():
             )
         """)
 
+        # Личные треки пользователей для миксов
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_tracks (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL,
+                song_id    TEXT    NOT NULL,
+                title      TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, song_id)
+            )
+        """)
+
         # Глобальная статистика (одна строка, id=1)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS stats (
@@ -262,3 +274,37 @@ async def unban_user(user_id: int):
             "DELETE FROM banned_users WHERE user_id = ?", (user_id,)
         )
         await db.commit()
+
+
+# ─── Библиотека пользователя (для миксов) ─────────────────────────────────────
+
+async def save_user_track(user_id: int, song_id: str, title: str):
+    """Сохраняет скачанный трек в личную библиотеку пользователя."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO user_tracks (user_id, song_id, title)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, song_id) DO UPDATE SET
+                title = excluded.title,
+                created_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, song_id, title),
+        )
+        await db.commit()
+
+
+async def get_user_recent_tracks(user_id: int, limit: int = 10) -> list[tuple[str, str]]:
+    """Возвращает [(song_id, title), ...] последних треков пользователя."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            """
+            SELECT song_id, title FROM user_tracks
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [(r[0], r[1] or "Suno Track") for r in rows]
