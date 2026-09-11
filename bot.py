@@ -7,6 +7,7 @@ import re
 import ssl
 import tempfile
 import time
+from datetime import datetime
 
 import aiohttp
 import certifi
@@ -14,8 +15,10 @@ from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter, TelegramAPIError
 from aiogram.types import (
     BufferedInputFile,
+    FSInputFile,
     ReplyKeyboardMarkup,
     KeyboardButton,
     InlineKeyboardMarkup,
@@ -58,6 +61,47 @@ logger = logging.getLogger("SunoBot")
 
 # ─── SSL ───────────────────────────────────────────────────────────────────────
 ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+
+# ─── Алерты об ошибках администратору ──────────────────────────────────────────
+_admin_error_timestamps: dict[str, float] = {}
+
+
+async def notify_admin_error(context: str, error: Exception, extra_info: str = ""):
+    """Отправляет уведомление об ошибке администратору с защитой от спама (1 алерт в 5 минут на тип ошибки)."""
+    if not ADMIN_ID:
+        return
+
+    key = f"{context}:{type(error).__name__}"
+    now = time.time()
+    last_sent = _admin_error_timestamps.get(key, 0)
+    if now - last_sent < 300:  # не чаще 1 раза в 5 минут
+        return
+    _admin_error_timestamps[key] = now
+
+    err_text = str(error)
+    if len(err_text) > 400:
+        err_text = err_text[:400] + "..."
+
+    msg = (
+        f"🚨 <b>Алерт SunoSaver</b>\n\n"
+        f"📍 <b>Контекст:</b> {html.escape(context)}\n"
+        f"⚠️ <b>Тип:</b> <code>{type(error).__name__}</code>\n"
+        f"📝 <b>Ошибка:</b> <code>{html.escape(err_text)}</code>"
+    )
+    if extra_info:
+        msg += f"\nℹ️ <b>Детали:</b> {html.escape(extra_info)}"
+
+    msg += f"\n\n⏱ <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</i>"
+
+    try:
+        await bot.send_message(
+            chat_id=ADMIN_ID,
+            text=msg,
+            parse_mode="HTML",
+            disable_notification=False,
+        )
+    except Exception as ex:
+        logger.warning("Не удалось отправить алерт админу: %s", ex)
 
 # ─── Bot & Dispatcher ──────────────────────────────────────────────────────────
 bot = Bot(token=BOT_TOKEN)
@@ -145,10 +189,13 @@ TEXTS = {
         "channel_sub_link": "📢 <b>Канал:</b>",
         "btn_lyrics":     "📜 Текст песни",
         "btn_wav":        "🎼 Скачать WAV",
+        "btn_video":      "🎬 Скачать видео",
         "lyrics_title":   "📜 <b>Текст песни «{title}»:</b>\n\n{lyrics}",
         "lyrics_none":    "ℹ️ У этого трека нет текста (инструментал).",
         "wav_generating": "⏳ Конвертирую и загружаю WAV (30-50 МБ)...",
         "wav_error":      "❌ Не удалось подготовить WAV файл. Попробуйте позже.",
+        "video_generating":"⏳ Создаю и загружаю видеоклип (MP4)...",
+        "video_error":    "❌ Не удалось подготовить видео. Попробуйте позже.",
         "btn_download_own": "🤖 Скачать свой трек",
         "btn_how_to":    "📥 Как скачать?",
         "btn_settings":  "⚙️ Настройки",
@@ -229,10 +276,13 @@ TEXTS = {
         "channel_sub_link": "📢 <b>Channel:</b>",
         "btn_lyrics":     "📜 Lyrics",
         "btn_wav":        "🎼 Download WAV",
+        "btn_video":      "🎬 Download Video",
         "lyrics_title":   "📜 <b>Lyrics for «{title}»:</b>\n\n{lyrics}",
         "lyrics_none":    "ℹ️ This track has no lyrics (instrumental).",
         "wav_generating": "⏳ Converting and uploading WAV (30-50 MB)...",
         "wav_error":      "❌ Could not prepare WAV file. Please try again later.",
+        "video_generating":"⏳ Generating and uploading video (MP4)...",
+        "video_error":    "❌ Could not prepare video. Please try again later.",
         "btn_download_own": "🤖 Download Your Track",
         "btn_how_to":    "📥 How to download?",
         "btn_settings":  "⚙️ Settings",
@@ -313,10 +363,13 @@ TEXTS = {
         "channel_sub_link": "📢 <b>Арна:</b>",
         "btn_lyrics":     "📜 Ән мәтіні",
         "btn_wav":        "🎼 WAV жүктеу",
+        "btn_video":      "🎬 Видео жүктеу",
         "lyrics_title":   "📜 <b>«{title}» әнінің мәтіні:</b>\n\n<blockquote>{lyrics}</blockquote>",
         "lyrics_none":    "ℹ️ Бұл тректің сөзі жоқ (инструментал).",
         "wav_generating": "⏳ WAV пішіміне түрлендіру және жүктеу (30-50 МБ)...",
         "wav_error":      "❌ WAV файлын дайындау мүмкін болмады. Кейінірек көріңіз.",
+        "video_generating":"⏳ Бейнеклип (MP4) дайындалуда және жүктелуде...",
+        "video_error":    "❌ Бейнені дайындау мүмкін болмады. Кейінірек көріңіз.",
         "btn_download_own": "🤖 Өз трегіңізді жүктеу",
         "btn_how_to":    "📥 Қалай жүктейді?",
         "btn_settings":  "⚙️ Баптаулар",
@@ -444,10 +497,15 @@ def get_track_inline_keyboard(
     if not song_id:
         return None
     t = TEXTS[lang]
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=t["btn_lyrics"], callback_data=f"lyrics:{song_id}"),
-        InlineKeyboardButton(text=t["btn_wav"], callback_data=f"wav:{song_id}"),
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=t["btn_lyrics"], callback_data=f"lyrics:{song_id}"),
+            InlineKeyboardButton(text=t["btn_wav"], callback_data=f"wav:{song_id}"),
+        ],
+        [
+            InlineKeyboardButton(text=t["btn_video"], callback_data=f"video:{song_id}"),
+        ],
+    ])
 
 
 def get_main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -790,6 +848,7 @@ async def _download_and_send(
 
         if not raw_audio:
             await status_msg.edit_text(t["error_download"], parse_mode="HTML")
+            await notify_admin_error("_download_and_send:download_failed", Exception("Не удалось скачать трек через Suno CDN и sunodownload.io"), f"URL: {suno_url}")
             return False
 
         original_song_id = song_id
@@ -830,6 +889,7 @@ async def _download_and_send(
 
     except Exception as e:
         logger.error("Ошибка пайплайна: %s", e, exc_info=True)
+        await notify_admin_error("_download_and_send:exception", e, f"URL: {suno_url}")
         try:
             await status_msg.edit_text(t["error_telegram"], parse_mode="HTML")
         except Exception:
@@ -914,6 +974,154 @@ async def cmd_unban(message: types.Message):
         parse_mode="HTML",
     )
     logger.info("Админ разблокировал %s", target_id)
+
+
+@dp.message(Command("broadcast"))
+async def cmd_broadcast(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    text_to_send = None
+    is_reply = False
+    if message.reply_to_message:
+        is_reply = True
+    else:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) > 1:
+            text_to_send = parts[1]
+        else:
+            await message.answer(
+                "📢 <b>Использование рассылки (/broadcast):</b>\n\n"
+                "1️⃣ <b>Ответом на сообщение:</b> отправьте в чат пост (текст, фото, видео, голосовое, кнопки) и ответьте на него командой <code>/broadcast</code>.\n"
+                "2️⃣ <b>Текстом:</b> <code>/broadcast &lt;текст сообщения&gt;</code>",
+                parse_mode="HTML"
+            )
+            return
+
+    users = await database.get_all_users()
+    total = len(users)
+    if total == 0:
+        await message.answer("ℹ️ В базе нет пользователей для рассылки.")
+        return
+
+    status_msg = await message.answer(
+        f"⏳ Начинаю рассылку для <b>{total}</b> пользователей...",
+        parse_mode="HTML"
+    )
+
+    sent = 0
+    blocked = 0
+    failed = 0
+    start_time = time.time()
+
+    for idx, uid in enumerate(users, 1):
+        try:
+            if is_reply:
+                await bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=message.chat.id,
+                    message_id=message.reply_to_message.message_id
+                )
+            else:
+                await bot.send_message(
+                    chat_id=uid,
+                    text=text_to_send,
+                    parse_mode="HTML"
+                )
+            sent += 1
+        except TelegramForbiddenError:
+            blocked += 1
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            try:
+                if is_reply:
+                    await bot.copy_message(
+                        chat_id=uid,
+                        from_chat_id=message.chat.id,
+                        message_id=message.reply_to_message.message_id
+                    )
+                else:
+                    await bot.send_message(
+                        chat_id=uid,
+                        text=text_to_send,
+                        parse_mode="HTML"
+                    )
+                sent += 1
+            except Exception:
+                failed += 1
+        except Exception as e:
+            failed += 1
+            logger.warning("Ошибка отправки сообщения пользователю %s при рассылке: %s", uid, e)
+
+        await asyncio.sleep(0.05)
+
+        if idx % 25 == 0 or idx == total:
+            try:
+                await status_msg.edit_text(
+                    f"📢 <b>Рассылка в процессе...</b>\n\n"
+                    f"👥 Прогресс: {idx}/{total}\n"
+                    f"✅ Доставлено: {sent}\n"
+                    f"🚫 Заблокировали: {blocked}\n"
+                    f"❌ Ошибок: {failed}",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    duration = time.time() - start_time
+    await status_msg.edit_text(
+        f"✅ <b>Рассылка успешно завершена!</b>\n\n"
+        f"👥 Всего пользователей: <b>{total}</b>\n"
+        f"📨 Успешно доставлено: <b>{sent}</b>\n"
+        f"🚫 Заблокировали бота: <b>{blocked}</b>\n"
+        f"❌ Ошибок доставки: <b>{failed}</b>\n"
+        f"⏱ Время выполнения: <b>{duration:.1f} сек</b>",
+        parse_mode="HTML"
+    )
+    logger.info("Рассылка завершена: sent=%s, blocked=%s, failed=%s, duration=%.1fs", sent, blocked, failed, duration)
+
+
+@dp.message(Command("backup"))
+async def cmd_backup(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    db_path = "bot_data.db"
+    if not os.path.exists(db_path):
+        await message.answer("❌ Файл базы данных не найден.")
+        return
+
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    filename = f"backup_bot_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"
+    db_file = FSInputFile(db_path, filename=filename)
+
+    await message.answer_document(
+        document=db_file,
+        caption=f"💾 <b>Резервная копия базы данных</b>\n📅 <code>{now_str}</code>\n⚡️ @sunosaver_bot",
+        parse_mode="HTML"
+    )
+
+
+async def periodic_db_backup():
+    """Фоновая задача: каждые 24 часа отправляет бэкап базы данных администратору."""
+    while True:
+        await asyncio.sleep(24 * 3600)
+        try:
+            db_path = "bot_data.db"
+            if ADMIN_ID and os.path.exists(db_path):
+                now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+                filename = f"backup_bot_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"
+                db_file = FSInputFile(db_path, filename=filename)
+                await bot.send_document(
+                    chat_id=ADMIN_ID,
+                    document=db_file,
+                    caption=f"💾 <b>Автоматический бэкап базы данных (24ч)</b>\n📅 <code>{now_str}</code>\n⚡️ @sunosaver_bot",
+                    parse_mode="HTML"
+                )
+                logger.info("Автобэкап базы данных отправлен админу %s", ADMIN_ID)
+        except Exception as e:
+            logger.error("Ошибка автобэкапа базы данных: %s", e, exc_info=True)
+            await notify_admin_error("periodic_db_backup", e)
 
 
 # ─── Кнопки меню ───────────────────────────────────────────────────────────────
@@ -1462,6 +1670,7 @@ async def handle_mix_mode(callback: CallbackQuery):
 
     except Exception as e:
         logger.error("Ошибка при создании микса: %s", e, exc_info=True)
+        await notify_admin_error("handle_mix_mode", e, f"tracks: {len(queue)}, mode: {mode}")
         try:
             await status_msg.edit_text(t["mix_error"], parse_mode="HTML")
         except Exception:
@@ -1768,8 +1977,290 @@ async def handle_wav_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error("Ошибка отправки WAV: %s", e, exc_info=True)
+        await notify_admin_error("handle_wav_callback", e, f"song_id: {song_id}")
         try:
             await progress_msg.edit_text(t["wav_error"], parse_mode="HTML")
+        except Exception:
+            pass
+
+
+async def generate_or_fetch_video(
+    raw_id: str,
+    session: aiohttp.ClientSession,
+) -> tuple[str | bytes | None, str, str | None]:
+    """
+    Возвращает (video_data_or_path, title, resolved_uuid).
+    video_data_or_path: путь к сгенерированному файлу .mp4, либо bytes скачанного видео, либо None.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Origin": "https://suno.com",
+        "Referer": "https://suno.com/",
+    }
+    uuid = raw_id
+    try:
+        m_uuid = UUID_PATTERN.search(raw_id)
+        if m_uuid:
+            uuid = m_uuid.group(0)
+        else:
+            try:
+                async with session.get(
+                    f"https://suno.com/s/{raw_id}", headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10), allow_redirects=True, ssl=ssl_ctx,
+                ) as r_suno:
+                    final_url = str(r_suno.url)
+                    found_uuid = extract_song_id(final_url)
+                    if found_uuid and UUID_PATTERN.match(found_uuid):
+                        uuid = found_uuid
+                    else:
+                        html_t = await r_suno.text(errors="ignore")
+                        u_m = UUID_PATTERN.search(html_t)
+                        if u_m:
+                            uuid = u_m.group(0)
+            except Exception as e:
+                logger.warning("Не удалось разрешить короткий ID %s в UUID: %s", raw_id, e)
+
+        title = "Suno Track"
+        # Проверяем кэш трека для названия
+        cached_track = await database.get_cached_track(raw_id)
+        if not cached_track and uuid:
+            cached_track = await database.get_cached_track(uuid)
+        if cached_track and cached_track[1]:
+            title = cached_track[1]
+
+        # Если названия нет, запрашиваем через studio-api clip
+        if title == "Suno Track" and uuid and UUID_PATTERN.match(uuid):
+            try:
+                async with session.get(
+                    f"https://studio-api.prod.suno.com/api/clip/{uuid}",
+                    headers=headers, timeout=aiohttp.ClientTimeout(total=5), ssl=ssl_ctx,
+                ) as meta_resp:
+                    if meta_resp.status == 200:
+                        data = await meta_resp.json()
+                        title = data.get("title") or "Suno Track"
+            except Exception:
+                pass
+
+        # 1. Попытка скачать готовый MP4 напрямую с Suno CDN
+        if uuid and UUID_PATTERN.match(uuid):
+            try:
+                async with session.get(
+                    f"https://cdn1.suno.ai/{uuid}.mp4",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=aiohttp.ClientTimeout(total=15),
+                    ssl=ssl_ctx,
+                ) as v_resp:
+                    if v_resp.status == 200:
+                        mp4_bytes = await v_resp.read()
+                        if len(mp4_bytes) > 200 * 1024:
+                            logger.info("Скачан готовый MP4 с Suno CDN (%s байт) для %s", len(mp4_bytes), uuid)
+                            return mp4_bytes, title, uuid
+            except Exception:
+                pass
+
+        # 2. Получаем аудио (из кэша Telegram или скачиванием)
+        audio_bytes = None
+        if cached_track and cached_track[0]:
+            try:
+                tg_file = await bot.get_file(cached_track[0])
+                tg_io = await bot.download_file(tg_file.file_path)
+                audio_bytes = tg_io.read() if hasattr(tg_io, "read") else tg_io.getvalue()
+                logger.info("Аудио получено из кэша Telegram (%s байт)", len(audio_bytes))
+            except Exception as e:
+                logger.warning("Не удалось скачать аудио из кэша Telegram: %s", e)
+
+        if not audio_bytes and uuid:
+            raw_audio, extracted_title, _, _ = await download_direct_from_suno(f"https://suno.com/song/{uuid}", session)
+            if raw_audio:
+                audio_bytes = raw_audio
+                if extracted_title and extracted_title != "Suno Track":
+                    title = extracted_title
+
+        if not audio_bytes:
+            logger.warning("Аудио не найдено для сборки видео: %s", raw_id)
+            return None, title, uuid
+
+        # 3. Скачиваем обложку трека
+        cover_bytes = None
+        if uuid and UUID_PATTERN.match(uuid):
+            for img_url in [f"https://cdn1.suno.ai/image_large_{uuid}.jpeg", f"https://cdn1.suno.ai/image_{uuid}.jpeg"]:
+                try:
+                    async with session.get(
+                        img_url, headers={"User-Agent": "Mozilla/5.0"},
+                        timeout=aiohttp.ClientTimeout(total=10), ssl=ssl_ctx,
+                    ) as img_resp:
+                        if img_resp.status == 200:
+                            img_data = await img_resp.read()
+                            if len(img_data) > 5 * 1024:
+                                cover_bytes = img_data
+                                break
+                except Exception:
+                    pass
+
+        # 4. Сборка видео MP4 через FFmpeg во временной папке
+        tmp_dir = tempfile.mkdtemp(prefix="sunovideo_")
+        audio_path = os.path.join(tmp_dir, "audio.mp3")
+        cover_path = os.path.join(tmp_dir, "cover.jpg")
+        output_path = os.path.join(tmp_dir, "output.mp4")
+
+        with open(audio_path, "wb") as f:
+            f.write(audio_bytes)
+
+        if cover_bytes:
+            with open(cover_path, "wb") as f:
+                f.write(cover_bytes)
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1", "-r", "2", "-i", cover_path,
+                "-i", audio_path,
+                "-c:v", "libx264", "-tune", "stillimage", "-preset", "ultrafast",
+                "-c:a", "aac", "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                "-vf", "scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2:black",
+                "-shortest", output_path
+            ]
+        else:
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", "color=c=0x181824:s=720x720:r=2",
+                "-i", audio_path,
+                "-c:v", "libx264", "-tune", "stillimage", "-preset", "ultrafast",
+                "-c:a", "aac", "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                "-shortest", output_path
+            ]
+
+        proc = await asyncio.create_subprocess_exec(
+            *ffmpeg_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+
+        try:
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            if os.path.exists(cover_path):
+                os.remove(cover_path)
+        except Exception:
+            pass
+
+        if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 100 * 1024:
+            logger.info("MP4 видео успешно собрано (%s байт) для %s", os.path.getsize(output_path), raw_id)
+            return output_path, title, uuid
+        else:
+            logger.error("Ошибка FFmpeg при сборке видео: %s", stderr.decode(errors="ignore"))
+            try:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                os.rmdir(tmp_dir)
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.warning("Ошибка generate_or_fetch_video: %s", e, exc_info=True)
+
+    return None, "Suno Track", uuid
+
+
+@dp.callback_query(F.data.startswith("video:"))
+async def handle_video_callback(callback: CallbackQuery):
+    song_id = callback.data.split(":", 1)[1]
+    lang = await database.get_user_language(callback.from_user.id, get_lang_fallback(callback.from_user))
+    t = TEXTS[lang]
+
+    # 1. Проверяем кэш видео
+    cached_video_fid = await database.get_cached_video(song_id)
+    cached_track = await database.get_cached_track(song_id)
+    title = cached_track[1] if cached_track and cached_track[1] else "Suno Track"
+    safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
+    escaped_title = html.escape(safe_title)
+    caption = f"🎬 <b>{escaped_title}</b>\n⚡️ @sunosaver_bot"
+
+    if cached_video_fid:
+        await callback.answer()
+        try:
+            await callback.message.reply_video(
+                video=cached_video_fid,
+                caption=caption,
+                supports_streaming=True,
+                request_timeout=180,
+                parse_mode="HTML",
+            )
+            return
+        except Exception as e:
+            logger.warning("Кэшированный video_file_id устарел: %s", e)
+
+    # 2. Уведомление пользователя
+    await callback.answer(t["video_generating"], show_alert=False)
+    progress_msg = await callback.message.reply(f"⏳ {t['video_generating']}", parse_mode="HTML")
+
+    try:
+        async with SEMAPHORE:
+            video_res, extracted_title, resolved_uuid = await generate_or_fetch_video(song_id, HTTP_SESSION)
+
+        # Если прямое получение вернуло resolved_uuid, проверяем кэш по нему
+        if not video_res and resolved_uuid and resolved_uuid != song_id:
+            uuid_cached_video = await database.get_cached_video(resolved_uuid)
+            if uuid_cached_video:
+                await callback.message.reply_video(
+                    video=uuid_cached_video,
+                    caption=caption,
+                    supports_streaming=True,
+                    request_timeout=180,
+                    parse_mode="HTML",
+                )
+                await database.save_video_cache(song_id, uuid_cached_video)
+                await progress_msg.delete()
+                return
+
+        if not video_res:
+            await progress_msg.edit_text(t["video_error"], parse_mode="HTML")
+            return
+
+        if extracted_title and extracted_title != "Suno Track":
+            safe_title = re.sub(r'[\\/*?:"<>|]', "", extracted_title).strip() or safe_title
+            escaped_title = html.escape(safe_title)
+            caption = f"🎬 <b>{escaped_title}</b>\n⚡️ @sunosaver_bot"
+
+        tmp_parent = None
+        if isinstance(video_res, bytes):
+            video_input = BufferedInputFile(video_res, filename=f"{safe_title}.mp4")
+        else:
+            tmp_parent = os.path.dirname(video_res)
+            video_input = FSInputFile(video_res, filename=f"{safe_title}.mp4")
+
+        sent_msg = await callback.message.reply_video(
+            video=video_input,
+            caption=caption,
+            supports_streaming=True,
+            width=720,
+            height=720,
+            request_timeout=180,
+            parse_mode="HTML",
+        )
+
+        # Очищаем временный файл и папку на диске
+        if isinstance(video_res, str) and os.path.exists(video_res):
+            try:
+                os.remove(video_res)
+                if tmp_parent and os.path.exists(tmp_parent):
+                    os.rmdir(tmp_parent)
+            except Exception:
+                pass
+
+        if sent_msg.video:
+            await database.save_video_cache(song_id, sent_msg.video.file_id)
+            if resolved_uuid and resolved_uuid != song_id:
+                await database.save_video_cache(resolved_uuid, sent_msg.video.file_id)
+
+        await progress_msg.delete()
+
+    except Exception as e:
+        logger.error("Ошибка отправки видео: %s", e, exc_info=True)
+        await notify_admin_error("handle_video_callback", e, f"song_id: {song_id}")
+        try:
+            await progress_msg.edit_text(t["video_error"], parse_mode="HTML")
         except Exception:
             pass
 
@@ -1885,6 +2376,8 @@ async def main():
 
     # Фоновая задача автоочистки каждые 24 ч
     asyncio.create_task(periodic_cache_cleanup())
+    # Фоновая задача автобэкапа базы данных каждые 24 ч
+    asyncio.create_task(periodic_db_backup())
 
     logger.info(
         "SunoSaver запущен! Admin: %s | Rate limit: %ss | Max links: %s",

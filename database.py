@@ -22,6 +22,7 @@ async def init_db():
                 title          TEXT,
                 lyrics         TEXT,
                 wav_file_id    TEXT,
+                video_file_id  TEXT,
                 download_count INTEGER DEFAULT 1,
                 created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -58,6 +59,19 @@ async def init_db():
         """)
         await db.execute("INSERT OR IGNORE INTO stats (id, total_downloads) VALUES (1, 0)")
 
+        # Миграция: добавляем новые колонки в track_cache для существующих БД
+        for sql in [
+            "ALTER TABLE track_cache ADD COLUMN download_count INTEGER DEFAULT 1",
+            "ALTER TABLE track_cache ADD COLUMN last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "ALTER TABLE track_cache ADD COLUMN lyrics TEXT",
+            "ALTER TABLE track_cache ADD COLUMN wav_file_id TEXT",
+            "ALTER TABLE track_cache ADD COLUMN video_file_id TEXT",
+        ]:
+            try:
+                await db.execute(sql)
+            except Exception:
+                pass
+
         await db.commit()
 
 
@@ -91,6 +105,18 @@ async def set_user_language(user_id: int, lang: str):
         await db.commit()
 
 
+async def get_all_users() -> list[int]:
+    """Возвращает список всех user_id незаблокированных пользователей для рассылки."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("""
+            SELECT u.user_id FROM users u
+            LEFT JOIN banned_users b ON u.user_id = b.user_id
+            WHERE b.user_id IS NULL
+        """) as cursor:
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows]
+
+
 # ─── Кэш треков ───────────────────────────────────────────────────────────────
 
 async def get_cached_track(song_id: str) -> tuple[str, str | None, str | None] | None:
@@ -100,7 +126,6 @@ async def get_cached_track(song_id: str) -> tuple[str, str | None, str | None] |
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                # Обновляем счётчик и время последнего использования
                 await db.execute(
                     """UPDATE track_cache
                        SET download_count = download_count + 1,
@@ -144,6 +169,32 @@ async def save_wav_cache(song_id: str, wav_file_id: str):
             ON CONFLICT(song_id) DO UPDATE SET wav_file_id = excluded.wav_file_id
             """,
             (song_id, wav_file_id),
+        )
+        await db.commit()
+
+
+async def get_cached_video(song_id: str) -> str | None:
+    """Возвращает Telegram video_file_id, если видео уже кэшировано."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT video_file_id FROM track_cache WHERE song_id = ?", (song_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                return row[0]
+            return None
+
+
+async def save_video_cache(song_id: str, video_file_id: str):
+    """Сохраняет Telegram video_file_id в кэш."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO track_cache (song_id, file_id, video_file_id)
+            VALUES (?, '', ?)
+            ON CONFLICT(song_id) DO UPDATE SET video_file_id = excluded.video_file_id
+            """,
+            (song_id, video_file_id),
         )
         await db.commit()
 
