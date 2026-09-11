@@ -58,17 +58,18 @@ async def init_db():
         """)
         await db.execute("INSERT OR IGNORE INTO stats (id, total_downloads) VALUES (1, 0)")
 
-        # Миграция: добавляем новые колонки в track_cache для старых БД
-        for sql in [
-            "ALTER TABLE track_cache ADD COLUMN download_count INTEGER DEFAULT 1",
-            "ALTER TABLE track_cache ADD COLUMN last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-            "ALTER TABLE track_cache ADD COLUMN lyrics TEXT",
-            "ALTER TABLE track_cache ADD COLUMN wav_file_id TEXT",
-        ]:
-            try:
-                await db.execute(sql)
-            except Exception:
-                pass  # Колонка уже существует — игнорируем
+        # Автомиграция: добавляем ранее скачанные треки из кэша в библиотеку админа
+        try:
+            import os
+            admin_id_env = int(os.getenv("ADMIN_ID", 0))
+            if admin_id_env:
+                await db.execute("""
+                    INSERT OR IGNORE INTO user_tracks (user_id, song_id, title, created_at)
+                    SELECT ?, song_id, COALESCE(title, 'Suno Track'), created_at
+                    FROM track_cache
+                """, (admin_id_env,))
+        except Exception:
+            pass
 
         await db.commit()
 
@@ -294,17 +295,25 @@ async def save_user_track(user_id: int, song_id: str, title: str):
         await db.commit()
 
 
-async def get_user_recent_tracks(user_id: int, limit: int = 10) -> list[tuple[str, str]]:
-    """Возвращает [(song_id, title), ...] последних треков пользователя."""
+async def get_user_tracks_count(user_id: int) -> int:
+    """Возвращает общее количество треков пользователя в библиотеке."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT COUNT(*) FROM user_tracks WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def get_user_recent_tracks(user_id: int, limit: int = 10, offset: int = 0) -> list[tuple[str, str]]:
+    """Возвращает [(song_id, title), ...] треков пользователя с пагинацией (новые первые)."""
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
             """
             SELECT song_id, title FROM user_tracks
             WHERE user_id = ?
-            ORDER BY created_at DESC
-            LIMIT ?
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
             """,
-            (user_id, limit),
+            (user_id, limit, offset),
         ) as cursor:
             rows = await cursor.fetchall()
             return [(r[0], r[1] or "Suno Track") for r in rows]

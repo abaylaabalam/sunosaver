@@ -44,7 +44,7 @@ if not BOT_TOKEN:
 CHANNEL_URL          = os.getenv("CHANNEL_URL", "https://t.me/youtubestantg")
 MAX_CONCURRENT       = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", 5))
 RATE_LIMIT_SECONDS   = int(os.getenv("RATE_LIMIT_SECONDS", 10))
-MAX_LINKS_PER_MSG    = int(os.getenv("MAX_LINKS_PER_MESSAGE", 3))
+MAX_LINKS_PER_MSG    = int(os.getenv("MAX_LINKS_PER_MESSAGE", 5))
 ADMIN_ID             = int(os.getenv("ADMIN_ID", 0))   # 0 = не задан
 CACHE_TTL_DAYS       = int(os.getenv("CACHE_TTL_DAYS", 30))
 MAX_MIX_TRACKS       = int(os.getenv("MAX_MIX_TRACKS", 10))
@@ -114,7 +114,7 @@ TEXTS = {
             "Под каждым отправленным MP3 нажмите <b>«📜 Текст песни»</b> для просмотра слов или <b>«🎼 Скачать WAV»</b> для файла студийного качества.\n\n"
             "3️⃣ <b>Создать микс из треков:</b>\n"
             "Нажмите <b>«🎛 Создать микс»</b> (или команда /mix). Выберите до 10 песен и склейте их в один непрерывный аудиофайл (встык или плавный DJ-микс с кроссфейдом)!\n\n"
-            "📦 <i>Можно отправлять до 3 ссылок в одном сообщении.</i>"
+            "📦 <i>Можно отправлять до 5 ссылок в одном сообщении.</i>"
         ),
         "about": (
             "ℹ️ <b>О сервисе Suno Saver (@sunosaver_bot):</b>\n\n"
@@ -125,7 +125,7 @@ TEXTS = {
             "• 🎛 <b>Конструктор миксов</b> — объединение до 10 песен в один цельный сет (обычная склейка или плавный DJ Crossfade с таймкодами).\n"
             "• 🏷 <b>ID3-теги и обложки</b> — название, автор и арт вшиты прямо в аудиофайл.\n"
             "• ⚡️ <b>Умный кэш</b> — мгновенная отдача ранее скачанных треков.\n"
-            "• 📦 <b>Пакетная загрузка</b> — до 3 ссылок одновременно в сообщении.\n"
+            "• 📦 <b>Пакетная загрузка</b> — до 5 ссылок одновременно в сообщении.\n"
             "• 🌍 <b>Мультиязычность</b> — Русский, English, Қазақша.\n\n"
             f"📢 <b>Наш официальный канал:</b> {CHANNEL_URL}"
         ),
@@ -198,7 +198,7 @@ TEXTS = {
             "Under each sent MP3, click <b>«📜 Lyrics»</b> to view song words or <b>«🎼 Download WAV»</b> for lossless studio audio.\n\n"
             "3️⃣ <b>Create a Mix:</b>\n"
             "Click <b>«🎛 Create Mix»</b> (or send /mix). Pick up to 10 tracks and stitch them into a single continuous file (Gapless or Smooth DJ Crossfade with timestamps)!\n\n"
-            "📦 <i>Up to 3 links in a single message.</i>"
+            "📦 <i>Up to 5 links in a single message.</i>"
         ),
         "about": (
             "ℹ️ <b>About Suno Saver (@sunosaver_bot):</b>\n\n"
@@ -209,7 +209,7 @@ TEXTS = {
             "• 🎛 <b>Suno Mix Maker</b> — combine up to 10 tracks into a single seamless set (Gapless or smooth DJ Crossfade with timestamps).\n"
             "• 🏷 <b>ID3 Tags & Artwork</b> — title, artist, and album artwork embedded into every file.\n"
             "• ⚡️ <b>Smart Cache</b> — instant redelivery of previously requested tracks.\n"
-            "• 📦 <b>Batch Downloads</b> — up to 3 links in one message.\n"
+            "• 📦 <b>Batch Downloads</b> — up to 5 links in one message.\n"
             "• 🌍 <b>Multilingual</b> — Russian, English, Kazakh.\n\n"
             f"📢 <b>Official Channel:</b> {CHANNEL_URL}"
         ),
@@ -282,7 +282,7 @@ TEXTS = {
             "Жіберілген әр әннің астындағы <b>«📜 Ән мәтіні»</b> (сөздерін көру) немесе <b>«🎼 WAV жүктеу»</b> (студиялық таза дыбыс) батырмасын басыңыз.\n\n"
             "3️⃣ <b>Әндерден микс жасау:</b>\n"
             "Мәзірден <b>«🎛 Микс жасау»</b> (немесе /mix пәрмені) таңдаңыз. 10 әнге дейін таңдап, бір тұтас үзіліссіз аудиофайлға біріктіріңіз (кәдімгі немесе DJ Crossfade)!\n\n"
-            "📦 <i>Бір хабарламада 3 сілтемеге дейін жіберуге болады.</i>"
+            "📦 <i>Бір хабарламада 5 сілтемеге дейін жіберуге болады.</i>"
         ),
         "about": (
             "ℹ️ <b>Suno Saver қызметі туралы (@sunosaver_bot):</b>\n\n"
@@ -293,7 +293,7 @@ TEXTS = {
             "• 🎛 <b>Микс құрастырушысы</b> — 10 әнге дейін бір тұтас сетке біріктіру (кәдімгі немесе таймкодтары бар плавный DJ Crossfade).\n"
             "• 🏷 <b>ID3-тегтер мен мұқаба</b> — ән атауы, орындаушысы аудиофайлға ендірілген.\n"
             "• ⚡️ <b>Ақылды кэш</b> — бұрын жүктелген тректерді қас қағым сәтте қайта жіберу.\n"
-            "• 📦 <b>Топтама жүктеу</b> — бір хабарламада бірден 3 сілтемеге дейін.\n"
+            "• 📦 <b>Топтама жүктеу</b> — бір хабарламада бірден 5 сілтемеге дейін.\n"
             "• 🌍 <b>3 тілді толық қолдау</b> — Қазақша, Орысша, Ағылшынша.\n\n"
             f"📢 <b>Біздің ресми арна:</b> {CHANNEL_URL}"
         ),
@@ -1066,25 +1066,40 @@ async def handle_lyrics_callback(callback: CallbackQuery):
 # ─── Конструктор миксов (Suno Mix Maker) ───────────────────────────────────────
 
 _user_mix_queues: dict[int, list[dict]] = {}
+_user_mix_pages:  dict[int, int] = {}
+MIX_PAGE_SIZE = 8
 
 
 async def render_mix_view(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup]:
-    """Генерирует текст и инлайн-клавиатуру конструктора миксов."""
+    """Генерирует текст и инлайн-клавиатуру конструктора миксов с пагинацией библиотеки."""
     t = TEXTS[lang]
     queue = _user_mix_queues.get(user_id, [])
-    recent_tracks = await database.get_user_recent_tracks(user_id, limit=12)
+
+    total_tracks = await database.get_user_tracks_count(user_id)
+    total_pages = max(1, (total_tracks + MIX_PAGE_SIZE - 1) // MIX_PAGE_SIZE)
+    cur_page = _user_mix_pages.get(user_id, 0)
+    if cur_page >= total_pages:
+        cur_page = max(0, total_pages - 1)
+        _user_mix_pages[user_id] = cur_page
+    if cur_page < 0:
+        cur_page = 0
+        _user_mix_pages[user_id] = 0
+
+    recent_tracks = await database.get_user_recent_tracks(
+        user_id, limit=MIX_PAGE_SIZE, offset=cur_page * MIX_PAGE_SIZE
+    )
 
     text = t["mix_menu_title"]
 
     if queue:
         items_str = "\n".join(f"{i+1}. 🎵 <b>{html.escape(item['title'])}</b>" for i, item in enumerate(queue))
         text += t["mix_current_queue"].format(count=len(queue), max_tracks=MAX_MIX_TRACKS, list=items_str)
-    elif not recent_tracks:
+    elif not recent_tracks and total_tracks == 0:
         text += "\n\n" + t["mix_empty_library"]
 
     keyboard_rows: list[list[InlineKeyboardButton]] = []
 
-    # Кнопки для каждого трека из недавней библиотеки пользователя
+    # Кнопки для каждого трека с текущей страницы библиотеки пользователя
     queue_song_ids = {item["song_id"] for item in queue}
     for s_id, s_title in recent_tracks:
         is_selected = s_id in queue_song_ids
@@ -1093,6 +1108,16 @@ async def render_mix_view(user_id: int, lang: str) -> tuple[str, InlineKeyboardM
         keyboard_rows.append([
             InlineKeyboardButton(text=btn_text, callback_data=f"mix_toggle:{s_id}")
         ])
+
+    # Строка навигации по страницам библиотеки (если треков больше, чем MIX_PAGE_SIZE)
+    if total_pages > 1:
+        page_nav: list[InlineKeyboardButton] = []
+        if cur_page > 0:
+            page_nav.append(InlineKeyboardButton(text="◀️", callback_data="mix_page:prev"))
+        page_nav.append(InlineKeyboardButton(text=f"📄 {cur_page + 1}/{total_pages} ({total_tracks})", callback_data="mix_page:noop"))
+        if cur_page < total_pages - 1:
+            page_nav.append(InlineKeyboardButton(text="▶️", callback_data="mix_page:next"))
+        keyboard_rows.append(page_nav)
 
     # Кнопки управления
     ctrl_row: list[InlineKeyboardButton] = []
@@ -1306,9 +1331,33 @@ async def handle_mix_cancel(callback: CallbackQuery):
     user_id = callback.from_user.id
     lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
     _user_mix_queues.pop(user_id, None)
+    _user_mix_pages.pop(user_id, None)
     await callback.answer()
     try:
         await callback.message.edit_text(TEXTS[lang]["mix_cancelled"], parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data.startswith("mix_page:"))
+async def handle_mix_page(callback: CallbackQuery):
+    action = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    if action == "noop":
+        await callback.answer()
+        return
+
+    cur_page = _user_mix_pages.get(user_id, 0)
+    if action == "prev":
+        _user_mix_pages[user_id] = max(0, cur_page - 1)
+    elif action == "next":
+        _user_mix_pages[user_id] = cur_page + 1
+
+    await callback.answer()
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    text, reply_markup = await render_mix_view(user_id, lang)
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
     except Exception:
         pass
 
@@ -1407,6 +1456,7 @@ async def handle_mix_mode(callback: CallbackQuery):
         )
 
         _user_mix_queues.pop(user_id, None)
+        _user_mix_pages.pop(user_id, None)
         await status_msg.delete()
 
     except Exception as e:
