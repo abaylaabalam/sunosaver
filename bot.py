@@ -1052,6 +1052,7 @@ async def handle_lyrics_callback(callback: CallbackQuery):
 
     # Если текст очень длинный (>4000 символов), разбиваем на части
     escaped_title = html.escape(title)
+    escaped_lyrics = html.escape(lyrics)
     template = t.get("lyrics_title", "📜 <b>«{title}»:</b>\n\n<blockquote>{lyrics}</blockquote>")
     if "<blockquote>" not in template:
         template = template.replace("{lyrics}", "<blockquote>{lyrics}</blockquote>")
