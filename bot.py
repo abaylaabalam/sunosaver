@@ -47,6 +47,7 @@ RATE_LIMIT_SECONDS   = int(os.getenv("RATE_LIMIT_SECONDS", 10))
 MAX_LINKS_PER_MSG    = int(os.getenv("MAX_LINKS_PER_MESSAGE", 3))
 ADMIN_ID             = int(os.getenv("ADMIN_ID", 0))   # 0 = не задан
 CACHE_TTL_DAYS       = int(os.getenv("CACHE_TTL_DAYS", 30))
+MAX_MIX_TRACKS       = int(os.getenv("MAX_MIX_TRACKS", 10))
 
 # ─── Логирование ───────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -105,24 +106,28 @@ TEXTS = {
             "Или выберите раздел в меню внизу 👇"
         ),
         "help": (
-            "📖 <b>Как скачать песню из Suno:</b>\n\n"
-            "1. Откройте трек на suno.com.\n"
-            "2. Нажмите <b>«Поделиться»</b> → <b>«Скопировать ссылку»</b>.\n"
-            "3. Отправьте ссылку боту — получите готовый MP3!\n\n"
-            "💡 Поддерживаются ссылки вида:\n"
-            "  • <code>suno.com/song/UUID</code>\n"
-            "  • <code>suno.com/s/shortID</code>\n"
-            "  • <code>share.suno.ai/...</code>\n\n"
-            "📦 До 3 ссылок в одном сообщении."
+            "📖 <b>Как пользоваться ботом Suno Saver:</b>\n\n"
+            "1️⃣ <b>Скачать песню:</b>\n"
+            "Откройте трек на suno.com → <b>«Поделиться»</b> (Share) → скопируйте ссылку и отправьте в этот чат. Бот пришлёт готовый MP3 с тегами и обложкой!\n"
+            "<i>Поддерживаются ссылки вида:</i> <code>suno.com/song/...</code>, <code>suno.com/s/...</code>\n\n"
+            "2️⃣ <b>Текст песни и WAV:</b>\n"
+            "Под каждым отправленным MP3 нажмите <b>«📜 Текст песни»</b> для просмотра слов или <b>«🎼 Скачать WAV»</b> для файла студийного качества.\n\n"
+            "3️⃣ <b>Создать микс из треков:</b>\n"
+            "Нажмите <b>«🎛 Создать микс»</b> (или команда /mix). Выберите до 10 песен и склейте их в один непрерывный аудиофайл (встык или плавный DJ-микс с кроссфейдом)!\n\n"
+            "📦 <i>Можно отправлять до 3 ссылок в одном сообщении.</i>"
         ),
         "about": (
-            "ℹ️ <b>О сервисе Suno Saver:</b>\n\n"
-            "• Быстрая конвертация и загрузка MP3\n"
-            "• ID3-теги: название и исполнитель в файле\n"
-            "• Кэширование — повторная отдача без скачивания\n"
-            "• Резервный CDN-сервер при сбоях\n"
-            "• Несколько ссылок в одном сообщении\n"
-            "• Автоочистка устаревшего кэша"
+            "ℹ️ <b>О сервисе Suno Saver (@sunosaver_bot):</b>\n\n"
+            "Универсальный и быстрый помощник для работы с музыкой из <b>Suno AI</b>.\n\n"
+            "✨ <b>Главные возможности:</b>\n"
+            "• 🎵 <b>MP3 и WAV</b> — мгновенное скачивание треков в высоком качестве.\n"
+            "• 📜 <b>Текст песни</b> — просмотр официального текста трека (Lyrics).\n"
+            "• 🎛 <b>Конструктор миксов</b> — объединение до 10 песен в один цельный сет (обычная склейка или плавный DJ Crossfade с таймкодами).\n"
+            "• 🏷 <b>ID3-теги и обложки</b> — название, автор и арт вшиты прямо в аудиофайл.\n"
+            "• ⚡️ <b>Умный кэш</b> — мгновенная отдача ранее скачанных треков.\n"
+            "• 📦 <b>Пакетная загрузка</b> — до 3 ссылок одновременно в сообщении.\n"
+            "• 🌍 <b>Мультиязычность</b> — Русский, English, Қазақша.\n\n"
+            f"📢 <b>Наш официальный канал:</b> {CHANNEL_URL}"
         ),
         "settings":      "⚙️ <b>Настройки интерфейса</b>\n\nВыберите язык:",
         "lang_changed":  "✅ Язык переключен на <b>Русский</b>!",
@@ -158,7 +163,7 @@ TEXTS = {
             "2️⃣ Нажмите <b>«Собрать микс»</b> и выберите тип склейки (обычная или плавный DJ-микс)."
         ),
         "mix_empty_library": "ℹ️ В вашей библиотеке пока нет сохранённых треков. Отправьте ссылку на трек Suno прямо сейчас, чтобы добавить его в микс:",
-        "mix_current_queue": "\n\n<b>Выбрано для микса ({count}/5):</b>\n{list}",
+        "mix_current_queue": "\n\n<b>Выбрано для микса ({count}/{max_tracks}):</b>\n{list}",
         "mix_btn_build": "🚀 Собрать микс ({count})",
         "mix_btn_clear": "🗑 Очистить",
         "mix_btn_cancel": "❌ Закрыть",
@@ -169,9 +174,9 @@ TEXTS = {
         "mix_processing": "⏳ Склеиваю <b>{count}</b> треков в единый микс...",
         "mix_error": "❌ Не удалось создать микс. Попробуйте снова.",
         "mix_min_tracks": "⚠️ Выберите хотя бы 2 трека для создания микса!",
-        "mix_max_reached": "⚠️ В микс можно добавить не более 5 треков.",
+        "mix_max_reached": f"⚠️ В микс можно добавить не более {MAX_MIX_TRACKS} треков.",
         "mix_cancelled": "❌ Создание микса закрыто.",
-        "mix_track_added": "✅ Трек «{title}» добавлен в микс ({count}/5)!",
+        "mix_track_added": "✅ Трек «{title}» добавлен в микс ({count}/{max_tracks})!",
         "btn_mix_these": "🎛 Склеить эти треки в микс",
     },
     "en": {
@@ -185,24 +190,28 @@ TEXTS = {
             "Or use the buttons below 👇"
         ),
         "help": (
-            "📖 <b>How to download a Suno song:</b>\n\n"
-            "1. Open the track on suno.com.\n"
-            "2. Click <b>«Share»</b> → <b>«Copy Link»</b>.\n"
-            "3. Send the link here — get an MP3 back!\n\n"
-            "💡 Supported link formats:\n"
-            "  • <code>suno.com/song/UUID</code>\n"
-            "  • <code>suno.com/s/shortID</code>\n"
-            "  • <code>share.suno.ai/...</code>\n\n"
-            "📦 Up to 3 links per message."
+            "📖 <b>How to use Suno Saver bot:</b>\n\n"
+            "1️⃣ <b>Download a song:</b>\n"
+            "Open your track on suno.com → click <b>«Share»</b> → copy link and send it here. The bot sends back high quality MP3 with tags and artwork!\n"
+            "<i>Supported link formats:</i> <code>suno.com/song/...</code>, <code>suno.com/s/...</code>\n\n"
+            "2️⃣ <b>Lyrics & WAV:</b>\n"
+            "Under each sent MP3, click <b>«📜 Lyrics»</b> to view song words or <b>«🎼 Download WAV»</b> for lossless studio audio.\n\n"
+            "3️⃣ <b>Create a Mix:</b>\n"
+            "Click <b>«🎛 Create Mix»</b> (or send /mix). Pick up to 10 tracks and stitch them into a single continuous file (Gapless or Smooth DJ Crossfade with timestamps)!\n\n"
+            "📦 <i>Up to 3 links in a single message.</i>"
         ),
         "about": (
-            "ℹ️ <b>About Suno Saver:</b>\n\n"
-            "• Fast MP3 conversion and download\n"
-            "• ID3 tags: title & artist embedded\n"
-            "• Caching — instant re-delivery\n"
-            "• Fallback CDN on failures\n"
-            "• Multiple links in one message\n"
-            "• Auto-cleanup of stale cache"
+            "ℹ️ <b>About Suno Saver (@sunosaver_bot):</b>\n\n"
+            "Your fast and powerful companion for downloading and managing music from <b>Suno AI</b>.\n\n"
+            "✨ <b>Main Features:</b>\n"
+            "• 🎵 <b>MP3 & Studio WAV</b> — instant high-quality audio downloads.\n"
+            "• 📜 <b>Song Lyrics</b> — extract official song lyrics and structure.\n"
+            "• 🎛 <b>Suno Mix Maker</b> — combine up to 10 tracks into a single seamless set (Gapless or smooth DJ Crossfade with timestamps).\n"
+            "• 🏷 <b>ID3 Tags & Artwork</b> — title, artist, and album artwork embedded into every file.\n"
+            "• ⚡️ <b>Smart Cache</b> — instant redelivery of previously requested tracks.\n"
+            "• 📦 <b>Batch Downloads</b> — up to 3 links in one message.\n"
+            "• 🌍 <b>Multilingual</b> — Russian, English, Kazakh.\n\n"
+            f"📢 <b>Official Channel:</b> {CHANNEL_URL}"
         ),
         "settings":      "⚙️ <b>Settings</b>\n\nChoose language:",
         "lang_changed":  "✅ Language changed to <b>English</b>!",
@@ -238,7 +247,7 @@ TEXTS = {
             "2️⃣ Click <b>«Build Mix»</b> and choose transition type (Normal or DJ Crossfade)."
         ),
         "mix_empty_library": "ℹ️ Your library is currently empty. Send a Suno link right now to add it to the mix:",
-        "mix_current_queue": "\n\n<b>Selected for mix ({count}/5):</b>\n{list}",
+        "mix_current_queue": "\n\n<b>Selected for mix ({count}/{max_tracks}):</b>\n{list}",
         "mix_btn_build": "🚀 Build Mix ({count})",
         "mix_btn_clear": "🗑 Clear",
         "mix_btn_cancel": "❌ Close",
@@ -249,9 +258,9 @@ TEXTS = {
         "mix_processing": "⏳ Stitching <b>{count}</b> tracks into a single mix...",
         "mix_error": "❌ Could not create mix. Please try again.",
         "mix_min_tracks": "⚠️ You need at least 2 tracks to create a mix!",
-        "mix_max_reached": "⚠️ You can add up to 5 tracks in a single mix.",
+        "mix_max_reached": f"⚠️ You can add up to {MAX_MIX_TRACKS} tracks in a single mix.",
         "mix_cancelled": "❌ Mix builder closed.",
-        "mix_track_added": "✅ Track «{title}» added to mix ({count}/5)!",
+        "mix_track_added": "✅ Track «{title}» added to mix ({count}/{max_tracks})!",
         "btn_mix_these": "🎛 Stitch these into a Mix",
     },
     "kk": {
@@ -265,24 +274,28 @@ TEXTS = {
             "Немесе төмендегі мәзірді таңдаңыз 👇"
         ),
         "help": (
-            "📖 <b>Suno-дан әнді қалай жүктеу керек:</b>\n\n"
-            "1. suno.com сайтында тректі ашыңыз.\n"
-            "2. <b>«Бөлісу» (Share)</b> → <b>«Сілтемені көшіру» (Copy Link)</b> басыңыз.\n"
-            "3. Сілтемені ботқа жіберіңіз — дайын MP3 алыңыз!\n\n"
-            "💡 Қолдау көрсетілетін сілтеме форматтары:\n"
-            "  • <code>suno.com/song/UUID</code>\n"
-            "  • <code>suno.com/s/shortID</code>\n"
-            "  • <code>share.suno.ai/...</code>\n\n"
-            "📦 Бір хабарламада 3 сілтемеге дейін."
+            "📖 <b>Suno Saver ботын қалай қолдану керек:</b>\n\n"
+            "1️⃣ <b>Әнді жүктеу:</b>\n"
+            "suno.com сайтында тректі ашыңыз → <b>«Бөлісу»</b> (Share) → сілтемені көшіріп чатқа жіберіңіз. Бот сапалы MP3 форматында мұқабасымен жібереді!\n"
+            "<i>Қолдау көрсетілетін сілтемелер:</i> <code>suno.com/song/...</code>, <code>suno.com/s/...</code>\n\n"
+            "2️⃣ <b>Ән мәтіні және WAV:</b>\n"
+            "Жіберілген әр әннің астындағы <b>«📜 Ән мәтіні»</b> (сөздерін көру) немесе <b>«🎼 WAV жүктеу»</b> (студиялық таза дыбыс) батырмасын басыңыз.\n\n"
+            "3️⃣ <b>Әндерден микс жасау:</b>\n"
+            "Мәзірден <b>«🎛 Микс жасау»</b> (немесе /mix пәрмені) таңдаңыз. 10 әнге дейін таңдап, бір тұтас үзіліссіз аудиофайлға біріктіріңіз (кәдімгі немесе DJ Crossfade)!\n\n"
+            "📦 <i>Бір хабарламада 3 сілтемеге дейін жіберуге болады.</i>"
         ),
         "about": (
-            "ℹ️ <b>Suno Saver қызметі туралы:</b>\n\n"
-            "• MP3-ке жылдам түрлендіру және жүктеу\n"
-            "• ID3-тегтер: файлда атауы мен орындаушысы көрсетіледі\n"
-            "• Кэштеу — қайта жүктеусіз лезде жіберу\n"
-            "• Ақаулар кезіндегі қосалқы CDN-сервер\n"
-            "• Бір хабарламада бірнеше сілтеме\n"
-            "• Ескірген кэшті автоматты түрде тазалау"
+            "ℹ️ <b>Suno Saver қызметі туралы (@sunosaver_bot):</b>\n\n"
+            "<b>Suno AI</b> тректерімен жұмыс істеуге арналған жылдам әрі ыңғайлы көмекшіңіз.\n\n"
+            "✨ <b>Негізгі мүмкіндіктері:</b>\n"
+            "• 🎵 <b>MP3 және студиялық WAV</b> — тректерді жоғары сапада лезде жүктеу.\n"
+            "• 📜 <b>Ән мәтіні (Lyrics)</b> — ресми сөздері мен құрылымын шығару.\n"
+            "• 🎛 <b>Микс құрастырушысы</b> — 10 әнге дейін бір тұтас сетке біріктіру (кәдімгі немесе таймкодтары бар плавный DJ Crossfade).\n"
+            "• 🏷 <b>ID3-тегтер мен мұқаба</b> — ән атауы, орындаушысы аудиофайлға ендірілген.\n"
+            "• ⚡️ <b>Ақылды кэш</b> — бұрын жүктелген тректерді қас қағым сәтте қайта жіберу.\n"
+            "• 📦 <b>Топтама жүктеу</b> — бір хабарламада бірден 3 сілтемеге дейін.\n"
+            "• 🌍 <b>3 тілді толық қолдау</b> — Қазақша, Орысша, Ағылшынша.\n\n"
+            f"📢 <b>Біздің ресми арна:</b> {CHANNEL_URL}"
         ),
         "settings":      "⚙️ <b>Интерфейс баптаулары</b>\n\nТілді таңдаңыз:",
         "lang_changed":  "✅ Тіл <b>Қазақ тіліне</b> ауыстырылды!",
@@ -318,7 +331,7 @@ TEXTS = {
             "2️⃣ <b>«Миксті құрастыру»</b> басып, біріктіру түрін таңдаңыз (кәдімгі немесе DJ кроссфейд)."
         ),
         "mix_empty_library": "ℹ️ Кітапханаңызда әзірге сақталған әндер жоқ. Микске қосу үшін қазір Suno сілтемесін жіберіңіз:",
-        "mix_current_queue": "\n\n<b>Микс үшін таңдалды ({count}/5):</b>\n{list}",
+        "mix_current_queue": "\n\n<b>Микс үшін таңдалды ({count}/{max_tracks}):</b>\n{list}",
         "mix_btn_build": "🚀 Миксті құрастыру ({count})",
         "mix_btn_clear": "🗑 Тазалау",
         "mix_btn_cancel": "❌ Жабу",
@@ -329,9 +342,9 @@ TEXTS = {
         "mix_processing": "⏳ <b>{count}</b> трек бір микске біріктірілуде...",
         "mix_error": "❌ Миксті жасау мүмкін болмады. Қайталап көріңіз.",
         "mix_min_tracks": "⚠️ Микс жасау үшін кемінде 2 трек таңдау қажет!",
-        "mix_max_reached": "⚠️ Бір микске ең көбі 5 трек қосуға болады.",
+        "mix_max_reached": f"⚠️ Бір микске ең көбі {MAX_MIX_TRACKS} трек қосуға болады.",
         "mix_cancelled": "❌ Микс шебері жабылды.",
-        "mix_track_added": "✅ «{title}» трегі микске қосылды ({count}/5)!",
+        "mix_track_added": "✅ «{title}» трегі микске қосылды ({count}/{max_tracks})!",
         "btn_mix_these": "🎛 Осы тректерден микс жасау",
     },
 }
@@ -917,6 +930,7 @@ async def btn_settings(message: types.Message):
     await message.answer(TEXTS[lang]["settings"], reply_markup=get_language_inline_keyboard(), parse_mode="HTML")
 
 
+@dp.message(Command("about"))
 @dp.message(F.text.in_([t["btn_about"] for t in TEXTS.values()]))
 async def btn_about(message: types.Message):
     lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
@@ -1058,13 +1072,13 @@ async def render_mix_view(user_id: int, lang: str) -> tuple[str, InlineKeyboardM
     """Генерирует текст и инлайн-клавиатуру конструктора миксов."""
     t = TEXTS[lang]
     queue = _user_mix_queues.get(user_id, [])
-    recent_tracks = await database.get_user_recent_tracks(user_id, limit=8)
+    recent_tracks = await database.get_user_recent_tracks(user_id, limit=12)
 
     text = t["mix_menu_title"]
 
     if queue:
         items_str = "\n".join(f"{i+1}. 🎵 <b>{html.escape(item['title'])}</b>" for i, item in enumerate(queue))
-        text += t["mix_current_queue"].format(count=len(queue), list=items_str)
+        text += t["mix_current_queue"].format(count=len(queue), max_tracks=MAX_MIX_TRACKS, list=items_str)
     elif not recent_tracks:
         text += "\n\n" + t["mix_empty_library"]
 
@@ -1170,6 +1184,15 @@ async def concatenate_tracks(
                     cur_time += durations[i]
             tracklist_text = "\n".join(tracklist_lines)
 
+            # Динамический битрейт, чтобы микс любой длительности укладывался в лимит Telegram (50 МБ)
+            total_dur = sum(durations)
+            if total_dur > 2400:      # > 40 минут
+                bitrate = "128k"
+            elif total_dur > 1500:    # > 25 минут
+                bitrate = "160k"
+            else:
+                bitrate = "192k"
+
             cmd = ["ffmpeg", "-y"]
             for f in input_files:
                 cmd.extend(["-i", f])
@@ -1186,7 +1209,7 @@ async def concatenate_tracks(
                 cmd.extend([
                     "-filter_complex", filter_str,
                     "-map", "[out]",
-                    "-c:a", "libmp3lame", "-b:a", "192k",
+                    "-c:a", "libmp3lame", "-b:a", bitrate,
                     out_file
                 ])
             else:
@@ -1194,7 +1217,7 @@ async def concatenate_tracks(
                 cmd.extend([
                     "-filter_complex", f"{inputs_labels}concat=n={n}:v=0:a=1[out]",
                     "-map", "[out]",
-                    "-c:a", "libmp3lame", "-b:a", "192k",
+                    "-c:a", "libmp3lame", "-b:a", bitrate,
                     out_file
                 ])
 
@@ -1241,7 +1264,7 @@ async def handle_mix_toggle(callback: CallbackQuery):
     if existing_idx is not None:
         queue.pop(existing_idx)
     else:
-        if len(queue) >= 5:
+        if len(queue) >= MAX_MIX_TRACKS:
             await callback.answer(t["mix_max_reached"], show_alert=True)
             return
         # Находим название трека
@@ -1364,8 +1387,10 @@ async def handle_mix_mode(callback: CallbackQuery):
         artist = "Suno AI (@sunosaver_bot)"
         tagged_mix = add_id3_tags(mix_bytes, mix_title, artist)
 
+        track_count = len(audio_tracks)
+        plural_word = "трека" if 2 <= track_count <= 4 else "треков"
         caption = (
-            f"🎛 <b>Suno Mix ({len(audio_tracks)} {'трека' if len(audio_tracks) < 5 else 'треков'})</b>\n"
+            f"🎛 <b>Suno Mix ({track_count} {plural_word})</b>\n"
             f"🎧 {mode_label}\n\n"
             f"<b>Треклист:</b>\n{tracklist_text}\n\n"
             f"⚡️ @sunosaver_bot"
@@ -1400,7 +1425,7 @@ async def handle_mix_quick(callback: CallbackQuery):
     t = TEXTS[lang]
 
     _user_mix_queues[user_id] = []
-    for s_id in raw_ids[:5]:
+    for s_id in raw_ids[:MAX_MIX_TRACKS]:
         title = "Suno Track"
         cached = await database.get_cached_track(s_id)
         if cached and cached[1]:
@@ -1720,7 +1745,7 @@ async def handle_suno_link(message: types.Message):
         queue = _user_mix_queues[user_id]
         added = 0
         for url in suno_urls:
-            if len(queue) >= 5:
+            if len(queue) >= MAX_MIX_TRACKS:
                 await message.answer(t["mix_max_reached"], parse_mode="HTML")
                 break
             s_id = extract_song_id(url)
@@ -1770,18 +1795,21 @@ async def setup_bot_commands():
         BotCommand(command="start",    description="Restart bot"),
         BotCommand(command="mix",      description="Create a music mix"),
         BotCommand(command="help",     description="How to download"),
+        BotCommand(command="about",    description="About SunoSaver"),
         BotCommand(command="settings", description="Change language"),
     ], scope=BotCommandScopeDefault())
     await bot.set_my_commands([
         BotCommand(command="start",    description="Перезапустить бота"),
         BotCommand(command="mix",      description="Собрать микс из песен"),
         BotCommand(command="help",     description="Инструкция"),
+        BotCommand(command="about",    description="О сервисе"),
         BotCommand(command="settings", description="Сменить язык"),
     ], scope=BotCommandScopeDefault(), language_code="ru")
     await bot.set_my_commands([
         BotCommand(command="start",    description="Ботты қайта іске қосу"),
         BotCommand(command="mix",      description="Әндерден микс жасау"),
         BotCommand(command="help",     description="Нұсқаулық"),
+        BotCommand(command="about",    description="Бот туралы"),
         BotCommand(command="settings", description="Тілді өзгерту"),
     ], scope=BotCommandScopeDefault(), language_code="kk")
 
