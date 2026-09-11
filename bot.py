@@ -1378,7 +1378,7 @@ async def cmd_backup(message: types.Message):
     if not is_admin(message.from_user.id):
         return
 
-    db_path = "bot_data.db"
+    db_path = database.DB_NAME
     if not os.path.exists(db_path):
         await message.answer("❌ Файл базы данных не найден.")
         return
@@ -1399,7 +1399,7 @@ async def periodic_db_backup():
     while True:
         await asyncio.sleep(24 * 3600)
         try:
-            db_path = "bot_data.db"
+            db_path = database.DB_NAME
             if ADMIN_ID and os.path.exists(db_path):
                 now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
                 filename = f"backup_bot_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"

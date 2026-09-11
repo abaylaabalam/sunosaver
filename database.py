@@ -1,7 +1,8 @@
 from datetime import datetime
+import os
 import aiosqlite
 
-DB_NAME = "bot_data.db"
+DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_data.db")
 
 
 async def init_db():
