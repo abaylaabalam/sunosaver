@@ -1,3 +1,4 @@
+from datetime import datetime
 import aiosqlite
 
 DB_NAME = "bot_data.db"
@@ -5,12 +6,27 @@ DB_NAME = "bot_data.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        # Пользователи и их языки
+        # Пользователи, их языки и реферальная система
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user_id  INTEGER PRIMARY KEY,
-                language TEXT    DEFAULT 'en',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                user_id       INTEGER PRIMARY KEY,
+                language      TEXT    DEFAULT 'en',
+                referrer_id   INTEGER DEFAULT NULL,
+                is_pro        INTEGER DEFAULT 0,
+                invited_count INTEGER DEFAULT 0,
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Ежедневные лимиты использования
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS daily_usage (
+                user_id         INTEGER,
+                date_str        TEXT,
+                downloads_count INTEGER DEFAULT 0,
+                mixes_count     INTEGER DEFAULT 0,
+                wav_count       INTEGER DEFAULT 0,
+                PRIMARY KEY(user_id, date_str)
             )
         """)
 
@@ -59,13 +75,16 @@ async def init_db():
         """)
         await db.execute("INSERT OR IGNORE INTO stats (id, total_downloads) VALUES (1, 0)")
 
-        # Миграция: добавляем новые колонки в track_cache для существующих БД
+        # Миграция: добавляем новые колонки в users и track_cache для существующих БД
         for sql in [
             "ALTER TABLE track_cache ADD COLUMN download_count INTEGER DEFAULT 1",
             "ALTER TABLE track_cache ADD COLUMN last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
             "ALTER TABLE track_cache ADD COLUMN lyrics TEXT",
             "ALTER TABLE track_cache ADD COLUMN wav_file_id TEXT",
             "ALTER TABLE track_cache ADD COLUMN video_file_id TEXT",
+            "ALTER TABLE users ADD COLUMN referrer_id INTEGER DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN is_pro INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN invited_count INTEGER DEFAULT 0",
         ]:
             try:
                 await db.execute(sql)
@@ -101,6 +120,165 @@ async def set_user_language(user_id: int, lang: str):
             ON CONFLICT(user_id) DO UPDATE SET language = excluded.language
             """,
             (user_id, lang),
+        )
+        await db.commit()
+
+
+async def register_or_get_user(
+    user_id: int,
+    fallback_lang: str,
+    referrer_id: int | None = None,
+) -> tuple[str, bool, int | None]:
+    """
+    Регистрирует или возвращает пользователя.
+    Возвращает (language, is_new_user, effective_referrer_id).
+    effective_referrer_id будет None, если пользователь уже был в БД или referrer_id невалиден.
+    """
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT language FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return row[0], False, None
+
+        # Проверяем, что referrer_id существует и не является самим пользователем
+        effective_ref = None
+        if referrer_id and referrer_id != user_id:
+            async with db.execute("SELECT 1 FROM users WHERE user_id = ?", (referrer_id,)) as r_cur:
+                if await r_cur.fetchone():
+                    effective_ref = referrer_id
+
+        await db.execute(
+            """
+            INSERT INTO users (user_id, language, referrer_id)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, fallback_lang, effective_ref),
+        )
+        await db.commit()
+        return fallback_lang, True, effective_ref
+
+
+async def add_referral_and_check_pro(
+    referrer_id: int,
+    required_referrals: int = 3,
+) -> tuple[int, bool]:
+    """
+    Увеличивает счетчик приглашенных у referrer_id.
+    Возвращает (new_invited_count, became_pro_just_now: bool).
+    """
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE users SET invited_count = invited_count + 1 WHERE user_id = ?",
+            (referrer_id,),
+        )
+        async with db.execute(
+            "SELECT invited_count, is_pro FROM users WHERE user_id = ?",
+            (referrer_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                await db.commit()
+                return 0, False
+
+            invited_count, is_pro = row[0] or 0, bool(row[1])
+            became_pro = False
+            if invited_count >= required_referrals and not is_pro:
+                await db.execute("UPDATE users SET is_pro = 1 WHERE user_id = ?", (referrer_id,))
+                became_pro = True
+
+            await db.commit()
+            return invited_count, became_pro
+
+
+async def is_user_pro(user_id: int, admin_id: int = 0) -> bool:
+    """Проверяет, является ли пользователь PRO-аккаунтом (администратор всегда PRO)."""
+    if admin_id and user_id == admin_id:
+        return True
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT is_pro FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return bool(row[0]) if row and row[0] else False
+
+
+async def get_user_pro_info(
+    user_id: int,
+    admin_id: int = 0,
+    required_referrals: int = 3,
+) -> dict:
+    """Возвращает информацию о статусе PRO, количестве приглашённых и дневном использовании."""
+    is_pro = True if (admin_id and user_id == admin_id) else False
+    invited_count = 0
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT is_pro, invited_count FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                if not is_pro:
+                    is_pro = bool(row[0])
+                invited_count = row[1] or 0
+
+        async with db.execute(
+            "SELECT downloads_count, mixes_count, wav_count FROM daily_usage WHERE user_id = ? AND date_str = ?",
+            (user_id, today),
+        ) as cursor:
+            u_row = await cursor.fetchone()
+            dl_today = u_row[0] if u_row else 0
+            mix_today = u_row[1] if u_row else 0
+            wav_today = u_row[2] if u_row else 0
+
+    needed = max(0, required_referrals - invited_count)
+    return {
+        "is_pro": is_pro,
+        "invited_count": invited_count,
+        "needed": needed,
+        "downloads_today": dl_today,
+        "mixes_today": mix_today,
+        "wav_today": wav_today,
+    }
+
+
+async def check_daily_limit(
+    user_id: int,
+    action: str,  # "downloads", "mixes", "wav"
+    limit: int,
+    is_pro: bool,
+) -> tuple[bool, int]:
+    """
+    Возвращает (allowed: bool, current_usage: int).
+    Для PRO-пользователей всегда возвращает (True, 0).
+    """
+    if is_pro:
+        return True, 0
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    col = f"{action}_count"
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            f"SELECT {col} FROM daily_usage WHERE user_id = ? AND date_str = ?",
+            (user_id, today),
+        ) as cursor:
+            row = await cursor.fetchone()
+            current = row[0] if row else 0
+            return current < limit, current
+
+
+async def increment_daily_usage(user_id: int, action: str):
+    """Увеличивает дневной счетчик action ('downloads', 'mixes', 'wav')."""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    col = f"{action}_count"
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            f"""
+            INSERT INTO daily_usage (user_id, date_str, {col})
+            VALUES (?, ?, 1)
+            ON CONFLICT(user_id, date_str) DO UPDATE SET {col} = {col} + 1
+            """,
+            (user_id, today),
         )
         await db.commit()
 
@@ -249,10 +427,11 @@ async def cleanup_old_cache(days: int = 30) -> int:
                         "DELETE FROM track_cache WHERE last_used < datetime('now', ?)",
                         (cutoff,),
                     )
-                    await db.commit()
+                # Очищаем устаревшие записи дневных лимитов (старше 7 дней)
+                await db.execute("DELETE FROM daily_usage WHERE date_str < date('now', '-7 days')")
+                await db.commit()
                 return count
             except Exception:
-                # Колонка last_used ещё не создана — пропускаем очистку
                 return 0
     except Exception:
         return 0

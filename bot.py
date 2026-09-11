@@ -14,7 +14,7 @@ import certifi
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter, TelegramAPIError
 from aiogram.types import (
     BufferedInputFile,
@@ -51,6 +51,11 @@ MAX_LINKS_PER_MSG    = int(os.getenv("MAX_LINKS_PER_MESSAGE", 5))
 ADMIN_ID             = int(os.getenv("ADMIN_ID", 0))   # 0 = не задан
 CACHE_TTL_DAYS       = int(os.getenv("CACHE_TTL_DAYS", 30))
 MAX_MIX_TRACKS       = int(os.getenv("MAX_MIX_TRACKS", 10))
+FREE_DAILY_DOWNLOADS = int(os.getenv("FREE_DAILY_DOWNLOADS", 20))
+FREE_DAILY_MIXES     = int(os.getenv("FREE_DAILY_MIXES", 5))
+FREE_DAILY_WAV       = int(os.getenv("FREE_DAILY_WAV", 1))
+FREE_MAX_MIX_TRACKS  = int(os.getenv("FREE_MAX_MIX_TRACKS", 5))
+REFERRALS_FOR_PRO    = int(os.getenv("REFERRALS_FOR_PRO", 3))
 
 # ─── Логирование ───────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -225,6 +230,68 @@ TEXTS = {
         "mix_cancelled": "❌ Создание микса закрыто.",
         "mix_track_added": "✅ Трек «{title}» добавлен в микс ({count}/{max_tracks})!",
         "btn_mix_these": "🎛 Склеить эти треки в микс",
+        "btn_pro": "⭐️ PRO / Рефералка",
+        "btn_share_ref": "📤 Поделиться с другом",
+        "ref_share_text": "Скачивай треки с Suno AI в высоком качестве, создавай DJ-миксы и качай студийный WAV через бота: {ref_url}",
+        "pro_active_text": (
+            "⭐️ <b>Ваш статус: PRO НАВСЕГДА</b> 🚀\n\n"
+            "Вам доступны все премиальные возможности без ограничений:\n"
+            "• ♾ <b>Безлимитное скачивание MP3</b>\n"
+            "• 🎛 <b>Миксы до 10 песен разом + DJ Crossfade</b>\n"
+            "• 🎼 <b>Безлимитный студийный WAV</b>\n"
+            "• 🎬 <b>Приоритетный рендер видео MP4</b>\n\n"
+            "👥 Вы пригласили друзей: <b>{invited}</b>\n\n"
+            "🔗 <b>Ваша персональная ссылка:</b>\n<code>{ref_url}</code>"
+        ),
+        "pro_promo_text": (
+            "⭐️ <b>Получите статус PRO НАВСЕГДА!</b> 🎁\n\n"
+            "Пригласите всего <b>{total} друзей</b> в бота и снимите все ограничения навсегда!\n\n"
+            "👥 <b>Ваш прогресс:</b> {invited} из {total} друзей <i>(осталось: {needed})</i>\n\n"
+            "📊 <b>Ваши лимиты на сегодня:</b>\n"
+            "• 🎵 Скачивание: <b>{dl_today} / {dl_max}</b> треков\n"
+            "• 🎛 Миксы: <b>{mix_today} / {mix_max}</b> (до 5 песен)\n"
+            "• 🎼 Студийный WAV: <b>{wav_today} / {wav_max}</b>\n\n"
+            "⭐️ <b>Что даёт статус PRO:</b>\n"
+            "✅ Полный безлимит на скачивание MP3\n"
+            "✅ Миксы до 10 песен в один сет\n"
+            "✅ Безлимитный студийный WAV (30-50 МБ)\n"
+            "✅ Приоритетная скорость обработки\n\n"
+            "🔗 <b>Ваша ссылка для приглашения:</b>\n<code>{ref_url}</code>"
+        ),
+        "limit_downloads_reached": (
+            "⚠️ <b>Дневной лимит исчерпан!</b>\n\n"
+            "Вы скачали <b>{limit} из {limit}</b> треков на сегодня. Лимит обновится в 00:00 UTC.\n\n"
+            "⭐️ <b>Хотите полный безлимит навсегда?</b>\n"
+            "Пригласите всего 3 друзей в бота по вашей ссылке:\n<code>{ref_url}</code>"
+        ),
+        "limit_mixes_reached": (
+            "⚠️ <b>Дневной лимит миксов исчерпан!</b>\n\n"
+            "Вы создали <b>{limit} из {limit}</b> миксов на сегодня.\n\n"
+            "⭐️ Пригласите 3 друзей и создавайте <b>миксы без ограничений</b>:\n<code>{ref_url}</code>"
+        ),
+        "limit_mixes_alert": "⚠️ Дневной лимит миксов исчерпан!",
+        "limit_mix_tracks_free": (
+            "⚠️ В бесплатной версии можно склеить до {free_max} песен в один микс.\n\n"
+            "⭐️ В <b>PRO-аккаунте</b> доступно объединение до 10 песен!\n"
+            "Пригласите 3 друзей, чтобы разблокировать PRO навсегда:\n<code>{ref_url}</code>"
+        ),
+        "limit_mix_tracks_alert": "⚠️ В бесплатной версии микс до 5 песен! Откройте PRO для 10 песен.",
+        "limit_wav_reached": (
+            "⚠️ <b>Дневной лимит WAV исчерпан!</b>\n\n"
+            "В бесплатной версии доступен 1 студийный WAV в день.\n\n"
+            "⭐️ Пригласите 3 друзей и качайте <b>WAV без ограничений</b>:\n<code>{ref_url}</code>"
+        ),
+        "limit_wav_alert": "⚠️ Дневной лимит WAV исчерпан! Откройте PRO за 3 друзей.",
+        "ref_progress": (
+            "🎉 <b>По вашей ссылке зарегистрировался друг!</b>\n\n"
+            "👥 Приглашено: <b>{invited}/{total}</b>\n"
+            "Осталось пригласить ещё <b>{remaining}</b> до статуса <b>PRO НАВСЕГДА</b>! ⭐️"
+        ),
+        "ref_pro_unlocked": (
+            "🔥 <b>ПОЗДРАВЛЯЕМ! ВЫ ПОЛУЧИЛИ PRO НАВСЕГДА!</b> ⭐️\n\n"
+            "Вы успешно пригласили <b>{total} друзей</b>!\n"
+            "Все дневные лимиты сняты, активирован безлимитный WAV и миксы до 10 песен. Спасибо, что вы с нами! 🚀"
+        ),
     },
     "en": {
         "start": (
@@ -312,6 +379,68 @@ TEXTS = {
         "mix_cancelled": "❌ Mix builder closed.",
         "mix_track_added": "✅ Track «{title}» added to mix ({count}/{max_tracks})!",
         "btn_mix_these": "🎛 Stitch these into a Mix",
+        "btn_pro": "⭐️ PRO / Referrals",
+        "btn_share_ref": "📤 Share with a friend",
+        "ref_share_text": "Download Suno AI tracks in high quality, build DJ mixes and get studio WAV audio via bot: {ref_url}",
+        "pro_active_text": (
+            "⭐️ <b>Your Status: PRO FOREVER</b> 🚀\n\n"
+            "All premium perks are fully unlocked for you:\n"
+            "• ♾ <b>Unlimited MP3 downloads</b>\n"
+            "• 🎛 <b>Mixes up to 10 tracks + DJ Crossfade</b>\n"
+            "• 🎼 <b>Unlimited studio lossless WAV</b>\n"
+            "• 🎬 <b>Priority MP4 video render</b>\n\n"
+            "👥 Invited friends: <b>{invited}</b>\n\n"
+            "🔗 <b>Your referral link:</b>\n<code>{ref_url}</code>"
+        ),
+        "pro_promo_text": (
+            "⭐️ <b>Get PRO Status FOREVER!</b> 🎁\n\n"
+            "Invite only <b>{total} friends</b> to the bot and unlock all features forever!\n\n"
+            "👥 <b>Your Progress:</b> {invited} of {total} friends <i>({needed} remaining)</i>\n\n"
+            "📊 <b>Your daily limits:</b>\n"
+            "• 🎵 Downloads: <b>{dl_today} / {dl_max}</b> tracks\n"
+            "• 🎛 Mixes: <b>{mix_today} / {mix_max}</b> (up to 5 tracks)\n"
+            "• 🎼 Studio WAV: <b>{wav_today} / {wav_max}</b>\n\n"
+            "⭐️ <b>What PRO gives you:</b>\n"
+            "✅ Unlimited MP3 downloads\n"
+            "✅ Up to 10 tracks in a single mix\n"
+            "✅ Unlimited studio lossless WAV (30-50 MB)\n"
+            "✅ Priority queue\n\n"
+            "🔗 <b>Your invite link:</b>\n<code>{ref_url}</code>"
+        ),
+        "limit_downloads_reached": (
+            "⚠️ <b>Daily download limit reached!</b>\n\n"
+            "You have downloaded <b>{limit} of {limit}</b> tracks today. Resets at 00:00 UTC.\n\n"
+            "⭐️ <b>Want unlimited downloads forever?</b>\n"
+            "Invite 3 friends to the bot with your link:\n<code>{ref_url}</code>"
+        ),
+        "limit_mixes_reached": (
+            "⚠️ <b>Daily mix limit reached!</b>\n\n"
+            "You have created <b>{limit} of {limit}</b> mixes today.\n\n"
+            "⭐️ Invite 3 friends and get <b>unlimited mixes forever</b>:\n<code>{ref_url}</code>"
+        ),
+        "limit_mixes_alert": "⚠️ Daily mix limit reached!",
+        "limit_mix_tracks_free": (
+            "⚠️ Free version allows up to {free_max} tracks per mix.\n\n"
+            "⭐️ <b>PRO version</b> allows combining up to 10 tracks!\n"
+            "Invite 3 friends to unlock PRO forever:\n<code>{ref_url}</code>"
+        ),
+        "limit_mix_tracks_alert": "⚠️ Free version limit is 5 tracks! Unlock PRO for 10 tracks.",
+        "limit_wav_reached": (
+            "⚠️ <b>Daily WAV limit reached!</b>\n\n"
+            "Free version allows 1 studio WAV per day.\n\n"
+            "⭐️ Invite 3 friends and download <b>unlimited WAV</b>:\n<code>{ref_url}</code>"
+        ),
+        "limit_wav_alert": "⚠️ Daily WAV limit reached! Unlock PRO by inviting 3 friends.",
+        "ref_progress": (
+            "🎉 <b>A friend joined via your link!</b>\n\n"
+            "👥 Invited: <b>{invited}/{total}</b>\n"
+            "Only <b>{remaining}</b> more to unlock <b>PRO FOREVER</b>! ⭐️"
+        ),
+        "ref_pro_unlocked": (
+            "🔥 <b>CONGRATULATIONS! PRO UNLOCKED FOREVER!</b> ⭐️\n\n"
+            "You have invited <b>{total} friends</b>!\n"
+            "All daily limits are removed, unlimited studio WAV and 10-track mixes are now yours forever. Thank you! 🚀"
+        ),
     },
     "kk": {
         "start": (
@@ -399,6 +528,68 @@ TEXTS = {
         "mix_cancelled": "❌ Микс шебері жабылды.",
         "mix_track_added": "✅ «{title}» трегі микске қосылды ({count}/{max_tracks})!",
         "btn_mix_these": "🎛 Осы тректерден микс жасау",
+        "btn_pro": "⭐️ PRO / Достар",
+        "btn_share_ref": "📤 Доспен бөлісу",
+        "ref_share_text": "Suno AI әндерін жоғары сапада жүкте, DJ-микстер жаса және студиялық WAV ал: {ref_url}",
+        "pro_active_text": (
+            "⭐️ <b>Сіздің мәртебеңіз: МӘҢГІЛІК PRO</b> 🚀\n\n"
+            "Барлық премиум мүмкіндіктер шектеусіз ашық:\n"
+            "• ♾ <b>Шектеусіз MP3 жүктеу</b>\n"
+            "• 🎛 <b>10 әнге дейін микс жасау + DJ Crossfade</b>\n"
+            "• 🎼 <b>Шектеусіз студиялық таза WAV</b>\n"
+            "• 🎬 <b>Бейнеклиптерді басымдықпен рендерлеу</b>\n\n"
+            "👥 Шақырған достарыңыз: <b>{invited}</b>\n\n"
+            "🔗 <b>Жеке сілтемеңіз:</b>\n<code>{ref_url}</code>"
+        ),
+        "pro_promo_text": (
+            "⭐️ <b>МӘҢГІЛІК PRO-СТАТУС АЛЫҢЫЗ!</b> 🎁\n\n"
+            "Ботқа бар болғаны <b>{total} дос</b> шақырып, барлық шектеулерді мәңгіге алып тастаңыз!\n\n"
+            "👥 <b>Сіздің нәтижеңіз:</b> {invited}/{total} дос <i>(тағы {needed} қажет)</i>\n\n"
+            "📊 <b>Бүгінгі күндік лимиттеріңіз:</b>\n"
+            "• 🎵 Жүктеу: <b>{dl_today} / {dl_max}</b> трек\n"
+            "• 🎛 Микстер: <b>{mix_today} / {mix_max}</b> (5 әнге дейін)\n"
+            "• 🎼 Студиялық WAV: <b>{wav_today} / {wav_max}</b>\n\n"
+            "⭐️ <b>PRO не береді:</b>\n"
+            "✅ MP3 жүктеуге толық шектеусіздік\n"
+            "✅ Бір микске 10 әнге дейін қосу\n"
+            "✅ Шектеусіз студиялық WAV (30-50 МБ)\n"
+            "✅ Басымдықты жоғары жылдамдық\n\n"
+            "🔗 <b>Достарды шақыру сілтемеңіз:</b>\n<code>{ref_url}</code>"
+        ),
+        "limit_downloads_reached": (
+            "⚠️ <b>Күндік шектеу таусылды!</b>\n\n"
+            "Бүгін <b>{limit} тректің {limit}-ін</b> жүктедіңіз. Лимит 00:00 UTC-де жаңарады.\n\n"
+            "⭐️ <b>Шектеусіз мәңгілік PRO алғыңыз келе ме?</b>\n"
+            "Сілтемеңіз арқылы 3 досыңызды шақырыңыз:\n<code>{ref_url}</code>"
+        ),
+        "limit_mixes_reached": (
+            "⚠️ <b>Күндік микс шектеуі таусылды!</b>\n\n"
+            "Бүгін <b>{limit} микстің {limit}-ін</b> жасадыңыз.\n\n"
+            "⭐️ 3 дос шақырып, <b>шектеусіз микстер жасаңыз</b>:\n<code>{ref_url}</code>"
+        ),
+        "limit_mixes_alert": "⚠️ Күндік микс шектеуі таусылды!",
+        "limit_mix_tracks_free": (
+            "⚠️ Тегін нұсқада бір микске 5 әнге дейін біріктіруге болады.\n\n"
+            "⭐️ <b>PRO-нұсқада</b> 10 әнге дейін рұқсат етілген!\n"
+            "Мәңгілік PRO-ны ашу үшін 3 дос шақырыңыз:\n<code>{ref_url}</code>"
+        ),
+        "limit_mix_tracks_alert": "⚠️ Тегін нұсқада ең көбі 5 ән! 10 ән үшін PRO ашыңыз.",
+        "limit_wav_reached": (
+            "⚠️ <b>Күндік WAV шектеуі таусылды!</b>\n\n"
+            "Тегін нұсқада күніне 1 студиялық WAV қолжетімді.\n\n"
+            "⭐️ 3 дос шақырып, <b>WAV-ты шектеусіз жүктеңіз</b>:\n<code>{ref_url}</code>"
+        ),
+        "limit_wav_alert": "⚠️ Күндік WAV лимиті таусылды! 3 дос шақырып PRO алыңыз.",
+        "ref_progress": (
+            "🎉 <b>Сілтемеңіз арқылы жаңа дос қосылды!</b>\n\n"
+            "👥 Шақырылды: <b>{invited}/{total}</b>\n"
+            "<b>МӘҢГІЛІК PRO</b> алу үшін тағы <b>{remaining}</b> дос қалды! ⭐️"
+        ),
+        "ref_pro_unlocked": (
+            "🔥 <b>ҚҰТТЫҚТАЙМЫЗ! СІЗГЕ МӘҢГІЛІК PRO БЕРІЛДІ!</b> ⭐️\n\n"
+            "Сіз <b>{total} дос</b> шақырдыңыз!\n"
+            "Барлық күндік шектеулер алынып тасталды, шектеусіз WAV және 10 әнге дейінгі микстер ашылды. Бізбен бірге болғаныңызға рақмет! 🚀"
+        ),
     },
 }
 
@@ -512,7 +703,7 @@ def get_main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
     t = TEXTS[lang]
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=t["btn_create_mix"])],
+            [KeyboardButton(text=t["btn_create_mix"]), KeyboardButton(text=t["btn_pro"])],
             [KeyboardButton(text=t["btn_how_to"]),  KeyboardButton(text=t["btn_settings"])],
             [KeyboardButton(text=t["btn_about"]),    KeyboardButton(text=t["btn_channel"])],
         ],
@@ -800,6 +991,19 @@ async def _download_and_send(
     total:     int | None = None,
 ) -> bool:
     """Скачивает и отправляет один трек. Возвращает True при успехе."""
+    user_id = message.from_user.id
+
+    # ── Проверка дневного лимита скачиваний ───────────────────────────────────
+    is_pro = await database.is_user_pro(user_id, admin_id=ADMIN_ID)
+    allowed, current_dl = await database.check_daily_limit(user_id, "downloads", FREE_DAILY_DOWNLOADS, is_pro)
+    if not allowed:
+        ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
+        await message.answer(
+            t["limit_downloads_reached"].format(limit=FREE_DAILY_DOWNLOADS, ref_url=ref_url),
+            parse_mode="HTML"
+        )
+        return False
+
     song_id = extract_song_id(suno_url)
 
     # ── Кэш ──────────────────────────────────────────────────────────────────
@@ -823,7 +1027,8 @@ async def _download_and_send(
                     parse_mode="HTML",
                 )
                 await database.increment_total_downloads()
-                await database.save_user_track(message.from_user.id, song_id, safe_title)
+                await database.increment_daily_usage(user_id, "downloads")
+                await database.save_user_track(user_id, song_id, safe_title)
                 return True
             except Exception as e:
                 logger.warning("Кэшированный file_id устарел, перекачиваем: %s", e)
@@ -883,6 +1088,7 @@ async def _download_and_send(
             if original_song_id and original_song_id != song_id:
                 await database.save_track_cache(original_song_id, sent_msg.audio.file_id, safe_title, lyrics)
             await database.save_user_track(message.from_user.id, song_id or original_song_id, safe_title)
+            await database.increment_daily_usage(message.from_user.id, "downloads")
 
         delete_status = True
         return True
@@ -907,8 +1113,50 @@ async def _download_and_send(
 # ─── Команды ───────────────────────────────────────────────────────────────────
 
 @dp.message(CommandStart())
-async def cmd_start(message: types.Message):
-    lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
+async def cmd_start(message: types.Message, command: CommandObject):
+    user_id = message.from_user.id
+    fallback_lang = get_lang_fallback(message.from_user)
+
+    referrer_id = None
+    if command.args:
+        ref_arg = command.args.strip()
+        if ref_arg.startswith("ref_"):
+            raw_id = ref_arg[4:]
+            if raw_id.isdigit():
+                referrer_id = int(raw_id)
+        elif ref_arg.isdigit():
+            referrer_id = int(ref_arg)
+
+    lang, is_new, effective_ref = await database.register_or_get_user(
+        user_id, fallback_lang, referrer_id
+    )
+
+    # Если это новый пользователь и у него есть действительный реферер
+    if is_new and effective_ref:
+        new_count, became_pro = await database.add_referral_and_check_pro(
+            effective_ref, required_referrals=REFERRALS_FOR_PRO
+        )
+        ref_lang = await database.get_user_language(effective_ref, "ru")
+        ref_t = TEXTS[ref_lang]
+        try:
+            if became_pro:
+                await bot.send_message(
+                    chat_id=effective_ref,
+                    text=ref_t["ref_pro_unlocked"].format(total=REFERRALS_FOR_PRO),
+                    parse_mode="HTML"
+                )
+            else:
+                remaining = max(0, REFERRALS_FOR_PRO - new_count)
+                await bot.send_message(
+                    chat_id=effective_ref,
+                    text=ref_t["ref_progress"].format(
+                        invited=new_count, total=REFERRALS_FOR_PRO, remaining=remaining
+                    ),
+                    parse_mode="HTML"
+                )
+        except Exception as e:
+            logger.warning("Не удалось уведомить реферера %s: %s", effective_ref, e)
+
     await message.answer(TEXTS[lang]["start"], reply_markup=get_main_menu_keyboard(lang), parse_mode="HTML")
 
 
@@ -922,6 +1170,48 @@ async def cmd_help(message: types.Message):
 async def cmd_settings(message: types.Message):
     lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
     await message.answer(TEXTS[lang]["settings"], reply_markup=get_language_inline_keyboard(), parse_mode="HTML")
+
+
+@dp.message(F.text.in_([t["btn_pro"] for t in TEXTS.values()]))
+@dp.message(Command("pro"))
+@dp.message(Command("ref"))
+async def cmd_pro_referral(message: types.Message):
+    import urllib.parse
+    user_id = message.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
+    t = TEXTS[lang]
+
+    pro_info = await database.get_user_pro_info(user_id, admin_id=ADMIN_ID, required_referrals=REFERRALS_FOR_PRO)
+    ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
+
+    # Быстрый шеринг в Telegram
+    share_text = t["ref_share_text"].format(ref_url=ref_url)
+    share_tg_url = f"https://t.me/share/url?url={urllib.parse.quote(ref_url)}&text={urllib.parse.quote(share_text)}"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["btn_share_ref"], url=share_tg_url)],
+    ])
+
+    if pro_info["is_pro"]:
+        text = t["pro_active_text"].format(
+            ref_url=ref_url,
+            invited=pro_info["invited_count"],
+        )
+    else:
+        text = t["pro_promo_text"].format(
+            ref_url=ref_url,
+            invited=pro_info["invited_count"],
+            total=REFERRALS_FOR_PRO,
+            needed=pro_info["needed"],
+            dl_today=pro_info["downloads_today"],
+            dl_max=FREE_DAILY_DOWNLOADS,
+            mix_today=pro_info["mixes_today"],
+            mix_max=FREE_DAILY_MIXES,
+            wav_today=pro_info["wav_today"],
+            wav_max=FREE_DAILY_WAV,
+        )
+
+    await message.answer(text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
 
 
 # ─── Команды администратора ────────────────────────────────────────────────────
@@ -1618,6 +1908,27 @@ async def handle_mix_mode(callback: CallbackQuery):
         await callback.answer(t["mix_min_tracks"], show_alert=True)
         return
 
+    # ── Проверка лимитов на миксы ──────────────────────────────────────────────
+    is_pro = await database.is_user_pro(user_id, admin_id=ADMIN_ID)
+    allowed, current_mixes = await database.check_daily_limit(user_id, "mixes", FREE_DAILY_MIXES, is_pro)
+    if not allowed:
+        ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
+        await callback.answer(t["limit_mixes_alert"], show_alert=True)
+        await callback.message.reply(
+            t["limit_mixes_reached"].format(limit=FREE_DAILY_MIXES, ref_url=ref_url),
+            parse_mode="HTML"
+        )
+        return
+
+    if not is_pro and len(queue) > FREE_MAX_MIX_TRACKS:
+        ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
+        await callback.answer(t["limit_mix_tracks_alert"], show_alert=True)
+        await callback.message.reply(
+            t["limit_mix_tracks_free"].format(free_max=FREE_MAX_MIX_TRACKS, ref_url=ref_url),
+            parse_mode="HTML"
+        )
+        return
+
     await callback.answer()
     status_msg = await callback.message.reply(t["mix_processing"].format(count=len(queue)), parse_mode="HTML")
 
@@ -1663,6 +1974,7 @@ async def handle_mix_mode(callback: CallbackQuery):
             request_timeout=180,
             parse_mode="HTML",
         )
+        await database.increment_daily_usage(user_id, "mixes")
 
         _user_mix_queues.pop(user_id, None)
         _user_mix_pages.pop(user_id, None)
@@ -1886,9 +2198,22 @@ async def download_direct_wav_from_suno(
 
 @dp.callback_query(F.data.startswith("wav:"))
 async def handle_wav_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
     song_id = callback.data.split(":", 1)[1]
-    lang = await database.get_user_language(callback.from_user.id, get_lang_fallback(callback.from_user))
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
     t = TEXTS[lang]
+
+    # ── Проверка дневного лимита WAV ──────────────────────────────────────────
+    is_pro = await database.is_user_pro(user_id, admin_id=ADMIN_ID)
+    allowed, _ = await database.check_daily_limit(user_id, "wav", FREE_DAILY_WAV, is_pro)
+    if not allowed:
+        ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
+        await callback.answer(t["limit_wav_alert"], show_alert=True)
+        await callback.message.reply(
+            t["limit_wav_reached"].format(limit=FREE_DAILY_WAV, ref_url=ref_url),
+            parse_mode="HTML"
+        )
+        return
 
     # Проверяем кэш WAV
     cached_wav_fid = await database.get_cached_wav(song_id)
@@ -1910,6 +2235,7 @@ async def handle_wav_callback(callback: CallbackQuery):
                 request_timeout=180,
                 parse_mode="HTML",
             )
+            await database.increment_daily_usage(user_id, "wav")
             return
         except Exception as e:
             logger.warning("Кэшированный WAV file_id устарел: %s", e)
@@ -1972,6 +2298,7 @@ async def handle_wav_callback(callback: CallbackQuery):
             await database.save_wav_cache(song_id, sent_msg.audio.file_id)
             if resolved_uuid and resolved_uuid != song_id:
                 await database.save_wav_cache(resolved_uuid, sent_msg.audio.file_id)
+            await database.increment_daily_usage(user_id, "wav")
 
         await progress_msg.delete()
 
@@ -2335,6 +2662,7 @@ async def handle_suno_link(message: types.Message):
 async def setup_bot_commands():
     await bot.set_my_commands([
         BotCommand(command="start",    description="Restart bot"),
+        BotCommand(command="pro",      description="⭐️ PRO status & referrals"),
         BotCommand(command="mix",      description="Create a music mix"),
         BotCommand(command="help",     description="How to download"),
         BotCommand(command="about",    description="About SunoSaver"),
@@ -2342,6 +2670,7 @@ async def setup_bot_commands():
     ], scope=BotCommandScopeDefault())
     await bot.set_my_commands([
         BotCommand(command="start",    description="Перезапустить бота"),
+        BotCommand(command="pro",      description="⭐️ PRO-статус и рефералка"),
         BotCommand(command="mix",      description="Собрать микс из песен"),
         BotCommand(command="help",     description="Инструкция"),
         BotCommand(command="about",    description="О сервисе"),
@@ -2349,6 +2678,7 @@ async def setup_bot_commands():
     ], scope=BotCommandScopeDefault(), language_code="ru")
     await bot.set_my_commands([
         BotCommand(command="start",    description="Ботты қайта іске қосу"),
+        BotCommand(command="pro",      description="⭐️ PRO-статус және достар"),
         BotCommand(command="mix",      description="Әндерден микс жасау"),
         BotCommand(command="help",     description="Нұсқаулық"),
         BotCommand(command="about",    description="Бот туралы"),
