@@ -207,6 +207,63 @@ TEXTS = {
         "btn_channel":   "📢 Our Channel",
         "btn_go_channel":"➡️ Go to Channel",
     },
+    "kk": {
+        "start": (
+            "👋 <b>Сәлем!</b> Мен <b>Suno AI</b> тректерін MP3 форматында жылдам жүктеп алуға көмектесемін.\n\n"
+            "🔗 <b>Әнге сілтеме жіберіңіз:</b>\n"
+            "<code>https://suno.com/song/...</code>\n"
+            "<code>https://suno.com/s/...</code>\n"
+            "<code>https://share.suno.ai/...</code>\n\n"
+            "💡 Бір хабарламада бірнеше сілтеме жіберуге болады!\n\n"
+            "Немесе төмендегі мәзірді таңдаңыз 👇"
+        ),
+        "help": (
+            "📖 <b>Suno-дан әнді қалай жүктеу керек:</b>\n\n"
+            "1. suno.com сайтында тректі ашыңыз.\n"
+            "2. <b>«Бөлісу» (Share)</b> → <b>«Сілтемені көшіру» (Copy Link)</b> басыңыз.\n"
+            "3. Сілтемені ботқа жіберіңіз — дайын MP3 алыңыз!\n\n"
+            "💡 Қолдау көрсетілетін сілтеме форматтары:\n"
+            "  • <code>suno.com/song/UUID</code>\n"
+            "  • <code>suno.com/s/shortID</code>\n"
+            "  • <code>share.suno.ai/...</code>\n\n"
+            "📦 Бір хабарламада 3 сілтемеге дейін."
+        ),
+        "about": (
+            "ℹ️ <b>Suno Saver қызметі туралы:</b>\n\n"
+            "• MP3-ке жылдам түрлендіру және жүктеу\n"
+            "• ID3-тегтер: файлда атауы мен орындаушысы көрсетіледі\n"
+            "• Кэштеу — қайта жүктеусіз лезде жіберу\n"
+            "• Ақаулар кезіндегі қосалқы CDN-сервер\n"
+            "• Бір хабарламада бірнеше сілтеме\n"
+            "• Ескірген кэшті автоматты түрде тазалау"
+        ),
+        "settings":      "⚙️ <b>Интерфейс баптаулары</b>\n\nТілді таңдаңыз:",
+        "lang_changed":  "✅ Тіл <b>Қазақ тіліне</b> ауыстырылды!",
+        "channel_msg":   f"📢 <b>Біздің ресми арна:</b>\nЖазылыңыз: {CHANNEL_URL}",
+        "fetching":      "⏳ Сілтеме өңделуде...",
+        "downloading":   "📥 Telegram-ға жүктелуде...",
+        "cdn_fallback":  "🔄 Негізгі қызмет қолжетімсіз, қосалқы CDN тексерілуде...",
+        "error_download":"❌ Тректі жүктеу мүмкін болмады. Оның ашық (public) екеніне көз жеткізіңіз.",
+        "error_telegram":"❌ Файлды жіберу кезінде қате орын алды. Кейінірек қайталап көріңіз.",
+        "error_rate_limit": "⏳ Тым жылдам! Біраз күте тұрыңыз.",
+        "banned":        "🚫 <b>Сіз бұғатталғансыз</b> және ботты қолдана алмайсыз.",
+        "multiple_links":"🔗 <b>{count}</b> сілтеме табылды. Кезекпен жүктелуде...",
+        "artist_label":  "👤 Авторы",
+        "downloaded_via": "⚡️ <b>Жүктелді:</b> @sunosaver_bot",
+        "channel_sub_link": "📢 <b>Арна:</b>",
+        "btn_lyrics":     "📜 Ән мәтіні",
+        "btn_wav":        "🎼 WAV жүктеу",
+        "lyrics_title":   "📜 <b>«{title}» әнінің мәтіні:</b>\n\n<blockquote>{lyrics}</blockquote>",
+        "lyrics_none":    "ℹ️ Бұл тректің сөзі жоқ (инструментал).",
+        "wav_generating": "⏳ WAV пішіміне түрлендіру және жүктеу (30-50 МБ)...",
+        "wav_error":      "❌ WAV файлын дайындау мүмкін болмады. Кейінірек көріңіз.",
+        "btn_download_own": "🤖 Өз трегіңізді жүктеу",
+        "btn_how_to":    "📥 Қалай жүктейді?",
+        "btn_settings":  "⚙️ Баптаулар",
+        "btn_about":     "ℹ️ Бот туралы",
+        "btn_channel":   "📢 Біздің арна",
+        "btn_go_channel":"➡️ Арнаға өту",
+    },
 }
 
 
@@ -262,8 +319,12 @@ def check_rate_limit(user_id: int) -> float:
 
 
 def get_lang_fallback(user: types.User) -> str:
-    if user.language_code and user.language_code.startswith("ru"):
-        return "ru"
+    if user.language_code:
+        code = user.language_code.lower()
+        if code.startswith("kk") or code.startswith("kz"):
+            return "kk"
+        if code.startswith("ru"):
+            return "ru"
     return "en"
 
 
@@ -320,6 +381,7 @@ def get_main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
 
 def get_language_inline_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🇰🇿 Қазақша", callback_data="set_lang:kk"),
         InlineKeyboardButton(text="🇷🇺 Русский", callback_data="set_lang:ru"),
         InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang:en"),
     ]])
@@ -770,25 +832,25 @@ async def cmd_unban(message: types.Message):
 
 # ─── Кнопки меню ───────────────────────────────────────────────────────────────
 
-@dp.message(F.text.in_(["📥 Как скачать?", "📥 How to download?"]))
+@dp.message(F.text.in_([t["btn_how_to"] for t in TEXTS.values()]))
 async def btn_help(message: types.Message):
     lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
     await message.answer(TEXTS[lang]["help"], parse_mode="HTML")
 
 
-@dp.message(F.text.in_(["⚙️ Настройки", "⚙️ Settings"]))
+@dp.message(F.text.in_([t["btn_settings"] for t in TEXTS.values()]))
 async def btn_settings(message: types.Message):
     lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
     await message.answer(TEXTS[lang]["settings"], reply_markup=get_language_inline_keyboard(), parse_mode="HTML")
 
 
-@dp.message(F.text.in_(["ℹ️ О боте", "ℹ️ About"]))
+@dp.message(F.text.in_([t["btn_about"] for t in TEXTS.values()]))
 async def btn_about(message: types.Message):
     lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
     await message.answer(TEXTS[lang]["about"], parse_mode="HTML")
 
 
-@dp.message(F.text.in_(["📢 Наш канал", "📢 Our Channel"]))
+@dp.message(F.text.in_([t["btn_channel"] for t in TEXTS.values()]))
 async def btn_channel(message: types.Message):
     lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
     t  = TEXTS[lang]
@@ -802,7 +864,7 @@ async def btn_channel(message: types.Message):
 
 @dp.callback_query(F.data.startswith("set_lang:"))
 async def handle_language_selection(callback: CallbackQuery):
-    lang_map = {"set_lang:ru": "ru", "set_lang:en": "en"}
+    lang_map = {"set_lang:ru": "ru", "set_lang:en": "en", "set_lang:kk": "kk"}
     new_lang = lang_map.get(callback.data)
     if not new_lang:
         await callback.answer("Unknown language", show_alert=True)
@@ -903,8 +965,10 @@ async def handle_lyrics_callback(callback: CallbackQuery):
 
     # Если текст очень длинный (>4000 символов), разбиваем на части
     escaped_title = html.escape(title)
-    escaped_lyrics = html.escape(lyrics)
-    msg_text = f"📜 <b>Текст песни «{escaped_title}»:</b>\n\n<blockquote>{escaped_lyrics}</blockquote>" if lang == "ru" else f"📜 <b>Lyrics for «{escaped_title}»:</b>\n\n<blockquote>{escaped_lyrics}</blockquote>"
+    template = t.get("lyrics_title", "📜 <b>«{title}»:</b>\n\n<blockquote>{lyrics}</blockquote>")
+    if "<blockquote>" not in template:
+        template = template.replace("{lyrics}", "<blockquote>{lyrics}</blockquote>")
+    msg_text = template.format(title=escaped_title, lyrics=escaped_lyrics)
 
     if len(msg_text) > 4000:
         msg_text = msg_text[:3950] + "...\n</blockquote>"
