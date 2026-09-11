@@ -58,19 +58,6 @@ async def init_db():
         """)
         await db.execute("INSERT OR IGNORE INTO stats (id, total_downloads) VALUES (1, 0)")
 
-        # Автомиграция: добавляем ранее скачанные треки из кэша в библиотеку админа
-        try:
-            import os
-            admin_id_env = int(os.getenv("ADMIN_ID", 0))
-            if admin_id_env:
-                await db.execute("""
-                    INSERT OR IGNORE INTO user_tracks (user_id, song_id, title, created_at)
-                    SELECT ?, song_id, COALESCE(title, 'Suno Track'), created_at
-                    FROM track_cache
-                """, (admin_id_env,))
-        except Exception:
-            pass
-
         await db.commit()
 
 
