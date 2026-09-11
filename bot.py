@@ -1223,10 +1223,12 @@ async def cmd_stats(message: types.Message):
     s = await database.get_stats()
     await message.answer(
         f"📊 <b>Статистика SunoSaver</b>\n\n"
-        f"👥 Пользователей:   <b>{s['total_users']:,}</b>\n"
-        f"🎵 Треков скачано:  <b>{s['total_downloads']:,}</b>\n"
-        f"💾 В кэше:          <b>{s['cached_tracks']:,}</b>\n"
-        f"🚫 Заблокировано:   <b>{s['banned_users']:,}</b>",
+        f"👥 Всего пользователей: <b>{s['total_users']:,}</b>\n"
+        f"🎁 По рефералке:        <b>{s['referral_users']:,}</b>\n"
+        f"⭐️ PRO-аккаунтов:       <b>{s['pro_users']:,}</b>\n"
+        f"🎵 Треков скачано:      <b>{s['total_downloads']:,}</b>\n"
+        f"💾 В кэше:              <b>{s['cached_tracks']:,}</b>\n"
+        f"🚫 Заблокировано:       <b>{s['banned_users']:,}</b>",
         parse_mode="HTML",
     )
 

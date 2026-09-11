@@ -455,6 +455,14 @@ async def get_stats() -> dict:
             row = await cursor.fetchone()
             cached_tracks = row[0] if row else 0
 
+        async with db.execute("SELECT COUNT(*) FROM users WHERE referrer_id IS NOT NULL") as cursor:
+            row = await cursor.fetchone()
+            referral_users = row[0] if row else 0
+
+        async with db.execute("SELECT COUNT(*) FROM users WHERE is_pro = 1") as cursor:
+            row = await cursor.fetchone()
+            pro_users = row[0] if row else 0
+
         async with db.execute("SELECT COUNT(*) FROM banned_users") as cursor:
             row = await cursor.fetchone()
             banned_count = row[0] if row else 0
@@ -462,6 +470,8 @@ async def get_stats() -> dict:
     return {
         "total_downloads": total_downloads,
         "total_users": total_users,
+        "referral_users": referral_users,
+        "pro_users": pro_users,
         "cached_tracks": cached_tracks,
         "banned_users": banned_count,
     }
