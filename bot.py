@@ -295,16 +295,15 @@ def add_id3_tags(audio_bytes: bytes, title: str, artist: str) -> bytes:
 def get_track_inline_keyboard(
     lang: str,
     song_id: str | None = None,
-    has_lyrics: bool = False,
+    has_lyrics: bool = True,
 ) -> InlineKeyboardMarkup | None:
     if not song_id:
         return None
     t = TEXTS[lang]
-    row: list[InlineKeyboardButton] = []
-    if has_lyrics:
-        row.append(InlineKeyboardButton(text=t["btn_lyrics"], callback_data=f"lyrics:{song_id}"))
-    row.append(InlineKeyboardButton(text=t["btn_wav"], callback_data=f"wav:{song_id}"))
-    return InlineKeyboardMarkup(inline_keyboard=[row])
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=t["btn_lyrics"], callback_data=f"lyrics:{song_id}"),
+        InlineKeyboardButton(text=t["btn_wav"], callback_data=f"wav:{song_id}"),
+    ]])
 
 
 def get_main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -610,7 +609,7 @@ async def _download_and_send(
             caption = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
             logger.info("Из кэша: %s", song_id)
             try:
-                reply_markup = get_track_inline_keyboard(lang, song_id, has_lyrics=bool(cached_lyrics))
+                reply_markup = get_track_inline_keyboard(lang, song_id)
                 await message.answer_audio(
                     audio=cached_fid,
                     caption=caption,
@@ -662,7 +661,7 @@ async def _download_and_send(
         tagged_audio   = add_id3_tags(raw_audio, safe_title, artist)
         audio_file     = BufferedInputFile(tagged_audio, filename=f"{safe_title}.mp3")
         caption        = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
-        reply_markup   = get_track_inline_keyboard(lang, song_id, has_lyrics=bool(lyrics))
+        reply_markup   = get_track_inline_keyboard(lang, song_id)
 
         # ── Отправка ──────────────────────────────────────────────────────────
         sent_msg = await message.answer_audio(
@@ -828,22 +827,69 @@ async def handle_lyrics_callback(callback: CallbackQuery):
     lang = await database.get_user_language(callback.from_user.id, get_lang_fallback(callback.from_user))
     t = TEXTS[lang]
 
+    # 1. Проверяем кэш базы данных
     lyrics = await database.get_track_lyrics(song_id)
+    uuid = song_id
+
+    # 2. Если в БД нет текста, пробуем разрешить короткий ID и получить текст с Suno
     if not lyrics:
-        # Попробуем запросить studio-api если в БД еще нет текста
-        try:
-            async with HTTP_SESSION.get(
-                f"https://studio-api.prod.suno.com/api/clip/{song_id}",
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=aiohttp.ClientTimeout(total=5), ssl=ssl_ctx,
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    lyrics = data.get("metadata", {}).get("prompt")
-                    if lyrics:
-                        lyrics = lyrics.strip()
-        except Exception:
-            pass
+        if not UUID_PATTERN.match(uuid):
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                }
+                async with HTTP_SESSION.get(
+                    f"https://suno.com/s/{song_id}", headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10), allow_redirects=True, ssl=ssl_ctx,
+                ) as r_suno:
+                    final_url = str(r_suno.url)
+                    found_uuid = extract_song_id(final_url)
+                    if found_uuid and UUID_PATTERN.match(found_uuid):
+                        uuid = found_uuid
+                    else:
+                        html_t = await r_suno.text(errors="ignore")
+                        u_m = UUID_PATTERN.search(html_t)
+                        if u_m:
+                            uuid = u_m.group(0)
+
+                    # Проверяем наличие prompt прямо в HTML
+                    html_t = await r_suno.text(errors="ignore")
+                    prompt_m = re.search(r'"prompt":"((?:[^"\\]|\\.)*)"', html_t)
+                    if prompt_m:
+                        try:
+                            lyrics = json.loads(f'"{prompt_m.group(1)}"').strip()
+                        except Exception:
+                            lyrics = prompt_m.group(1).strip()
+            except Exception as e:
+                logger.warning("Не удалось разрешить ID для текста: %s", e)
+
+        # Если ещё не нашли текст, пробуем studio-api clip
+        if not lyrics and uuid:
+            try:
+                async with HTTP_SESSION.get(
+                    f"https://studio-api.prod.suno.com/api/clip/{uuid}",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=aiohttp.ClientTimeout(total=5), ssl=ssl_ctx,
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        lyrics = data.get("metadata", {}).get("prompt")
+                        if lyrics:
+                            lyrics = lyrics.strip()
+            except Exception as e:
+                logger.warning("Ошибка запроса studio-api clip для lyrics: %s", e)
+
+        # Сохраняем найденный текст в БД
+        if lyrics:
+            try:
+                cached = await database.get_cached_track(song_id)
+                cached_title = cached[1] if cached else "Suno Track"
+                cached_fid = cached[0] if cached else ""
+                await database.save_track_cache(song_id, cached_fid, cached_title, lyrics)
+                if uuid and uuid != song_id:
+                    await database.save_track_cache(uuid, cached_fid, cached_title, lyrics)
+            except Exception as e:
+                logger.warning("Не удалось закэшировать текст: %s", e)
 
     if not lyrics:
         await callback.answer(t["lyrics_none"], show_alert=True)
