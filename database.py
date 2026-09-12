@@ -472,6 +472,11 @@ async def get_stats() -> dict:
             row = await cursor.fetchone()
             dl_today, mix_today, wav_today = (row[0], row[1], row[2]) if row else (0, 0, 0)
 
+        # Всего миксов и WAV за всё время
+        async with db.execute("SELECT COALESCE(SUM(mixes_count), 0), COALESCE(SUM(wav_count), 0) FROM daily_usage") as cursor:
+            row = await cursor.fetchone()
+            total_mixes, total_wavs = (row[0], row[1]) if row else (0, 0)
+
         async with db.execute("SELECT language, COUNT(*) FROM users GROUP BY language ORDER BY COUNT(*) DESC") as cursor:
             lang_rows = await cursor.fetchall()
             languages = []
@@ -511,6 +516,8 @@ async def get_stats() -> dict:
         "downloads_today": dl_today,
         "mixes_today": mix_today,
         "wav_today": wav_today,
+        "total_mixes": total_mixes,
+        "total_wavs": total_wavs,
         "languages": languages,
         "referral_users": referral_users,
         "pro_users": pro_users,
