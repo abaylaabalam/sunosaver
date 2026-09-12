@@ -1222,6 +1222,9 @@ async def cmd_start(message: types.Message, command: CommandObject):
         except Exception as e:
             logger.warning("Не удалось уведомить реферера %s: %s", effective_ref, e)
 
+    if is_new:
+        asyncio.create_task(check_and_trigger_100_promo())
+
     await message.answer(TEXTS[lang]["start"], reply_markup=get_main_menu_keyboard(lang), parse_mode="HTML")
 
 
@@ -1279,7 +1282,138 @@ async def cmd_pro_referral(message: types.Message):
     await message.answer(text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
 
 
+# ─── Праздничное промо: 100 пользователей ────────────────────────────────────
+
+PROMO_100_TEXTS = {
+    "ru": (
+        "🎉 <b>Ура! Нас уже 100 пользователей!</b>\n\n"
+        "Огромное спасибо каждому из вас за то, что пользуетесь SunoSaver! ❤️\n\n"
+        "В честь этой крутой отметки мы дарим вам <b>навсегда статус PRO</b>! ⭐️\n\n"
+        "<b>Что теперь открыто на вашем аккаунте:</b>\n"
+        "🚀 <b>Безлимитные</b> скачивания треков каждый день\n"
+        "🎼 Скачивание аудио в студийном качестве <b>WAV (HD)</b>\n"
+        "🎬 Выгрузка <b>MP4 видео</b> с визуализацией трека\n"
+        "🎛 Создание миксов <b>до 10 песен</b> с плавным DJ Crossfade\n\n"
+        "Ваш PRO-аккаунт уже активирован! Творите и создавайте шедевры без ограничений 🎧"
+    ),
+    "en": (
+        "🎉 <b>Hooray! We've reached 100 users!</b>\n\n"
+        "A huge thank you to each of you for using SunoSaver! ❤️\n\n"
+        "To celebrate this milestone, we are gifting you a <b>lifetime PRO status</b>! ⭐️\n\n"
+        "<b>What's unlocked on your account:</b>\n"
+        "🚀 <b>Unlimited</b> daily track downloads\n"
+        "🎼 Studio-quality lossless <b>WAV (HD)</b> downloads\n"
+        "🎬 <b>MP4 video</b> exports with track visualizer\n"
+        "🎛 Seamless DJ mix builder for up to <b>10 tracks</b>\n\n"
+        "Your PRO status is already active! Enjoy creating great music without limits 🎧"
+    ),
+    "kk": (
+        "🎉 <b>Керемет жаңалық! Біз 100 қолданушыға жеттік!</b>\n\n"
+        "SunoSaver-ді таңдағаныңыз үшін әрқайсыңызға үлкен алғыс! ❤️\n\n"
+        "Осы маңызды меже құрметіне біз сізге <b>PRO мәртебесін мәңгіге сыйлаймыз</b>! ⭐️\n\n"
+        "<b>Сіздің аккаунтыңызда ашылған мүмкіндіктер:</b>\n"
+        "🚀 Күніне <b>шектеусіз</b> трек жүктеу\n"
+        "🎼 Студиялық таза <b>WAV (HD)</b> дыбыс сапасы\n"
+        "🎬 Визуализациясы бар <b>MP4 бейнеклиптер</b>\n"
+        "🎛 <b>10 әнге дейін</b> DJ Crossfade арқылы микс жасау\n\n"
+        "PRO-мәртебеңіз белсендірілді! Шектеусіз шығармашылық шабыт тілейміз 🎧"
+    ),
+}
+
+_promo_100_lock = asyncio.Lock()
+
+
+async def check_and_trigger_100_promo(force: bool = False) -> tuple[bool, int, int]:
+    """
+    Проверяет, достигнута ли отметка в 100 пользователей, и если да —
+    выдает первым 100 пользователям вечный PRO и отправляет рассылку.
+    Возвращает (was_triggered, pro_count, sent_count).
+    """
+    async with _promo_100_lock:
+        if not force and await database.is_promo_100_awarded():
+            return False, 0, 0
+
+        total_users = await database.get_total_users_count()
+        if not force and total_users < 100:
+            return False, 0, 0
+
+        logger.info("🎉 Достигнута отметка 100 пользователей! Запуск промо-рассылки...")
+
+        # 1. Выдаем PRO первым 100 пользователям
+        pro_count = await database.award_pro_to_first_n_users(100)
+
+        # 2. Получаем список первых 100 пользователей с их языками
+        users = await database.get_first_n_users_with_lang(100)
+        sent_count = 0
+
+        for uid, lang in users:
+            msg_text = PROMO_100_TEXTS.get(lang, PROMO_100_TEXTS["ru"])
+            try:
+                await bot.send_message(chat_id=uid, text=msg_text, parse_mode="HTML")
+                sent_count += 1
+                await asyncio.sleep(0.05)  # не спамим Telegram API
+            except TelegramForbiddenError:
+                pass
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                try:
+                    await bot.send_message(chat_id=uid, text=msg_text, parse_mode="HTML")
+                    sent_count += 1
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning("Ошибка отправки промо-сообщения пользователю %s: %s", uid, e)
+
+        # 3. Уведомляем администратора
+        if ADMIN_ID:
+            try:
+                await bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"🎉 <b>Событие: Нас 100 пользователей!</b>\n\n"
+                        f"⭐️ Первым 100 пользователям успешно выдан <b>вечный PRO</b>!\n"
+                        f"📩 Рассылка доставлена: <b>{sent_count} / {len(users)}</b> пользователям."
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error("Не удалось уведомить админа о 100 пользователях: %s", e)
+
+        return True, pro_count, sent_count
+
+
 # ─── Команды администратора ────────────────────────────────────────────────────
+
+@dp.message(Command("promo100"))
+async def cmd_promo100(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    force = len(parts) > 1 and parts[1].lower() in ("force", "run", "now")
+
+    is_awarded = await database.is_promo_100_awarded()
+    total_users = await database.get_total_users_count()
+
+    if not force:
+        status_str = "✅ Уже проведена" if is_awarded else f"⏳ Ожидает ({total_users}/100 пользователей)"
+        await message.answer(
+            f"🎁 <b>Промо-акция «Первые 100 пользователей — PRO навсегда»:</b>\n\n"
+            f"• Статус: <b>{status_str}</b>\n"
+            f"• Пользователей в базе: <b>{total_users}</b>\n\n"
+            f"<i>Для принудительного запуска прямо сейчас отправьте:</i> <code>/promo100 force</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    await message.answer("⏳ Запускаю выдачу PRO и рассылку первым 100 пользователям...", parse_mode="HTML")
+    triggered, pro_count, sent_count = await check_and_trigger_100_promo(force=True)
+    await message.answer(
+        f"✅ <b>Промо-рассылка завершена!</b>\n\n"
+        f"⭐️ Всего пользователей с PRO: <b>{pro_count}</b>\n"
+        f"📩 Доставлено поздравлений: <b>{sent_count}</b>",
+        parse_mode="HTML",
+    )
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):

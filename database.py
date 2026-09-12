@@ -76,6 +76,14 @@ async def init_db():
         """)
         await db.execute("INSERT OR IGNORE INTO stats (id, total_downloads) VALUES (1, 0)")
 
+        # Настройки приложения и флаги
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+
         # Миграция: добавляем новые колонки в users и track_cache для существующих БД
         for sql in [
             "ALTER TABLE track_cache ADD COLUMN download_count INTEGER DEFAULT 1",
@@ -581,3 +589,70 @@ async def get_user_recent_tracks(user_id: int, limit: int = 10, offset: int = 0)
         ) as cursor:
             rows = await cursor.fetchall()
             return [(r[0], r[1] or "Suno Track") for r in rows]
+
+
+# ─── Системные настройки и промо ──────────────────────────────────────────────
+
+async def get_setting(key: str, default: str = "") -> str:
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT value FROM app_settings WHERE key = ?", (key,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else default
+
+
+async def set_setting(key: str, value: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        await db.commit()
+
+
+async def is_promo_100_awarded() -> bool:
+    val = await get_setting("promo_100_awarded", "0")
+    return val == "1"
+
+
+async def get_total_users_count() -> int:
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def award_pro_to_first_n_users(n: int = 100) -> int:
+    """Выдает вечный PRO первым n зарегистрированным пользователям."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            UPDATE users SET is_pro = 1
+            WHERE user_id IN (
+                SELECT user_id FROM users ORDER BY created_at ASC LIMIT ?
+            )
+            """,
+            (n,),
+        )
+        await db.commit()
+        await set_setting("promo_100_awarded", "1")
+        async with db.execute("SELECT COUNT(*) FROM users WHERE is_pro = 1") as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def get_first_n_users_with_lang(n: int = 100) -> list[tuple[int, str]]:
+    """Возвращает [(user_id, language), ...] для первых n пользователей."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            """
+            SELECT user_id, COALESCE(language, 'ru')
+            FROM users
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (n,),
+        ) as cursor:
+            return await cursor.fetchall()
