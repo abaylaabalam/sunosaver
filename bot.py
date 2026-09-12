@@ -643,6 +643,14 @@ def extract_song_id(url: str) -> str | None:
     return None
 
 
+def make_suno_url(song_id: str) -> str:
+    """Возвращает корректный URL Suno для UUID (/song/...) или короткого ID (/s/...)."""
+    clean_id = song_id.strip()
+    if UUID_PATTERN.match(clean_id):
+        return f"https://suno.com/song/{clean_id}"
+    return f"https://suno.com/s/{clean_id}"
+
+
 def is_valid_mp3(data: bytes) -> bool:
     if len(data) < 50 * 1024:          # < 50 КБ
         return False
@@ -1930,17 +1938,37 @@ async def get_track_audio_bytes(song_id: str) -> tuple[bytes | None, str]:
             except Exception as e:
                 logger.warning("Не удалось скачать MP3 из кэша Telegram: %s", e)
 
-    # Если в Telegram нет, пробуем прямое скачивание с Suno
-    raw_audio, extracted_title, _, _ = await download_direct_from_suno(f"https://suno.com/song/{song_id}", HTTP_SESSION)
-    if raw_audio and is_valid_mp3(raw_audio):
-        return raw_audio, extracted_title or title
+    target_url = make_suno_url(song_id)
 
-    # Резервный способ через sunodownload.io
-    fallback_raw, fb_title = await convert_and_download_mp3(f"https://suno.com/song/{song_id}", HTTP_SESSION)
-    if fallback_raw and is_valid_mp3(fallback_raw):
-        return fallback_raw, fb_title or title
+    session = HTTP_SESSION
+    local_session = None
+    if session is None or session.closed:
+        local_session = aiohttp.ClientSession()
+        session = local_session
 
-    return None, title
+    try:
+        # Если в Telegram нет, пробуем прямое скачивание с Suno
+        try:
+            raw_audio, extracted_title, _, _ = await download_direct_from_suno(target_url, session)
+            if raw_audio and is_valid_mp3(raw_audio):
+                return raw_audio, extracted_title or title
+        except TrackNotFoundError:
+            logger.info("Трек не найден на Suno (404): %s", target_url)
+        except Exception as e:
+            logger.warning("Ошибка прямого скачивания для микса (%s): %s", target_url, e)
+
+        # Резервный способ через sunodownload.io
+        try:
+            fallback_raw, fb_title = await convert_and_download_mp3(target_url, session)
+            if fallback_raw and is_valid_mp3(fallback_raw):
+                return fallback_raw, fb_title or title
+        except Exception as e:
+            logger.warning("Ошибка резервного скачивания для микса (%s): %s", target_url, e)
+
+        return None, title
+    finally:
+        if local_session and not local_session.closed:
+            await local_session.close()
 
 
 async def concatenate_tracks(
@@ -2217,9 +2245,14 @@ async def handle_mix_mode(callback: CallbackQuery):
         # Скачиваем аудио всех треков
         audio_tracks: list[tuple[bytes, str]] = []
         for item in queue:
-            raw_bytes, item_title = await get_track_audio_bytes(item["song_id"])
-            if raw_bytes:
-                audio_tracks.append((raw_bytes, item_title or item["title"]))
+            try:
+                raw_bytes, item_title = await get_track_audio_bytes(item["song_id"])
+                if raw_bytes:
+                    audio_tracks.append((raw_bytes, item_title or item["title"]))
+                else:
+                    logger.warning("Не удалось скачать трек %s для микса", item["song_id"])
+            except Exception as e:
+                logger.warning("Ошибка получения трека %s для микса: %s", item["song_id"], e)
 
         if len(audio_tracks) < 2:
             err_text = t["mix_error"] + t.get("error_contact", "")
@@ -2266,7 +2299,8 @@ async def handle_mix_mode(callback: CallbackQuery):
 
     except Exception as e:
         logger.error("Ошибка при создании микса: %s", e, exc_info=True)
-        await notify_admin_error("handle_mix_mode", e, f"tracks: {len(queue)}, mode: {mode}")
+        if not isinstance(e, TrackNotFoundError):
+            await notify_admin_error("handle_mix_mode", e, f"tracks: {len(queue)}, mode: {mode}")
         try:
             err_text = t["mix_error"] + t.get("error_contact", "")
             await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
@@ -2694,11 +2728,14 @@ async def generate_or_fetch_video(
                 logger.warning("Не удалось скачать аудио из кэша Telegram: %s", e)
 
         if not audio_bytes and uuid:
-            raw_audio, extracted_title, _, _ = await download_direct_from_suno(f"https://suno.com/song/{uuid}", session)
-            if raw_audio:
-                audio_bytes = raw_audio
-                if extracted_title and extracted_title != "Suno Track":
-                    title = extracted_title
+            try:
+                raw_audio, extracted_title, _, _ = await download_direct_from_suno(make_suno_url(uuid), session)
+                if raw_audio:
+                    audio_bytes = raw_audio
+                    if extracted_title and extracted_title != "Suno Track":
+                        title = extracted_title
+            except Exception as e:
+                logger.warning("Не удалось скачать аудио для сборки видео (%s): %s", uuid, e)
 
         if not audio_bytes:
             logger.warning("Аудио не найдено для сборки видео: %s", raw_id)
