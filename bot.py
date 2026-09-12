@@ -1060,6 +1060,8 @@ async def _download_and_send(
 
     try:
         # ── 1. Прямая загрузка с Suno через ffmpeg (основной метод) ───────────
+        raw_audio = None
+        title = "Suno Track"
         lyrics = None
         resolved_uuid = None
         is_not_found = False
