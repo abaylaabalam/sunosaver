@@ -452,9 +452,36 @@ async def get_stats() -> dict:
             row = await cursor.fetchone()
             total_users = row[0] if row else 0
 
+        async with db.execute("SELECT COUNT(*) FROM users WHERE created_at >= datetime('now', '-24 hours')") as cursor:
+            row = await cursor.fetchone()
+            new_users_24h = row[0] if row else 0
+
+        async with db.execute("SELECT COUNT(DISTINCT user_id) FROM daily_usage WHERE date_str = date('now')") as cursor:
+            row = await cursor.fetchone()
+            active_users_today = row[0] if row else 0
+
+        async with db.execute("SELECT COALESCE(SUM(downloads_count), 0), COALESCE(SUM(mixes_count), 0), COALESCE(SUM(wav_count), 0) FROM daily_usage WHERE date_str = date('now')") as cursor:
+            row = await cursor.fetchone()
+            dl_today, mix_today, wav_today = (row[0], row[1], row[2]) if row else (0, 0, 0)
+
+        async with db.execute("SELECT language, COUNT(*) FROM users GROUP BY language ORDER BY COUNT(*) DESC") as cursor:
+            lang_rows = await cursor.fetchall()
+            languages = []
+            for l_code, count in lang_rows:
+                pct = round((count / total_users * 100), 1) if total_users > 0 else 0
+                languages.append({"lang": l_code, "count": count, "percent": pct})
+
         async with db.execute("SELECT COUNT(*) FROM track_cache") as cursor:
             row = await cursor.fetchone()
             cached_tracks = row[0] if row else 0
+
+        async with db.execute("SELECT COUNT(*) FROM track_cache WHERE video_file_id IS NOT NULL AND video_file_id != ''") as cursor:
+            row = await cursor.fetchone()
+            cached_videos = row[0] if row else 0
+
+        async with db.execute("SELECT COUNT(*) FROM track_cache WHERE wav_file_id IS NOT NULL AND wav_file_id != ''") as cursor:
+            row = await cursor.fetchone()
+            cached_wavs = row[0] if row else 0
 
         async with db.execute("SELECT COUNT(*) FROM users WHERE referrer_id IS NOT NULL") as cursor:
             row = await cursor.fetchone()
@@ -471,11 +498,20 @@ async def get_stats() -> dict:
     return {
         "total_downloads": total_downloads,
         "total_users": total_users,
+        "new_users_24h": new_users_24h,
+        "active_users_today": active_users_today,
+        "downloads_today": dl_today,
+        "mixes_today": mix_today,
+        "wav_today": wav_today,
+        "languages": languages,
         "referral_users": referral_users,
         "pro_users": pro_users,
         "cached_tracks": cached_tracks,
+        "cached_videos": cached_videos,
+        "cached_wavs": cached_wavs,
         "banned_users": banned_count,
     }
+
 
 
 # ─── Блокировка пользователей ─────────────────────────────────────────────────

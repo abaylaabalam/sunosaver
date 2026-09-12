@@ -67,6 +67,12 @@ logger = logging.getLogger("SunoBot")
 # ─── SSL ───────────────────────────────────────────────────────────────────────
 ssl_ctx = ssl.create_default_context(cafile=certifi.where())
 
+# ─── Исключения ───────────────────────────────────────────────────────────────
+class TrackNotFoundError(Exception):
+    """Вызывается, если трек удалён, приватный или не существует на Suno (404/403)."""
+    pass
+
+
 # ─── Алерты об ошибках администратору ──────────────────────────────────────────
 _admin_error_timestamps: dict[str, float] = {}
 
@@ -185,6 +191,7 @@ TEXTS = {
         "downloading":   "📥 Загружаю в Telegram...",
         "cdn_fallback":  "🔄 Основной сервис недоступен, пробую резервный CDN...",
         "error_download":"❌ Не удалось скачать трек. Убедитесь, что он публичный.",
+        "error_track_not_found": "❌ Трек не найден на Suno.\nВозможно, он был удалён автором или является приватным.",
         "error_telegram":"❌ Ошибка при отправке файла. Попробуйте позже.",
         "error_rate_limit": "⏳ Не так быстро! Подождите немного.",
         "banned":        "🚫 <b>Вы заблокированы</b> и не можете использовать бота.",
@@ -334,6 +341,7 @@ TEXTS = {
         "downloading":   "📥 Uploading to Telegram...",
         "cdn_fallback":  "🔄 Main service unavailable, trying fallback CDN...",
         "error_download":"❌ Could not download the track. Make sure it's public.",
+        "error_track_not_found": "❌ Track not found on Suno.\nIt may have been deleted by the author or set to private.",
         "error_telegram":"❌ Error delivering file. Please try again later.",
         "error_rate_limit": "⏳ Slow down! Please wait a moment.",
         "banned":        "🚫 <b>You are banned</b> and cannot use this bot.",
@@ -483,6 +491,7 @@ TEXTS = {
         "downloading":   "📥 Telegram-ға жүктелуде...",
         "cdn_fallback":  "🔄 Негізгі қызмет қолжетімсіз, қосалқы CDN тексерілуде...",
         "error_download":"❌ Тректі жүктеу мүмкін болмады. Оның ашық (public) екеніне көз жеткізіңіз.",
+        "error_track_not_found": "❌ Трек Suno-дан табылмады.\nМүмкін, автор оны өшірген немесе жеке (private) жасаған.",
         "error_telegram":"❌ Файлды жіберу кезінде қате орын алды. Кейінірек қайталап көріңіз.",
         "error_rate_limit": "⏳ Тым жылдам! Біраз күте тұрыңыз.",
         "banned":        "🚫 <b>Сіз бұғатталғансыз</b> және ботты қолдана алмайсыз.",
@@ -741,6 +750,9 @@ async def convert_and_download_mp3(
             ) as resp:
                 logger.info("sunodownload.io → HTTP %s (попытка %s/%s)", resp.status, attempt, max_attempts)
                 if resp.status != 200:
+                    if resp.status in (400, 404):
+                        logger.info("sunodownload.io вернул HTTP %s (трек не найден или приватный)", resp.status)
+                        raise TrackNotFoundError(f"sunodownload.io returned {resp.status}")
                     if resp.status == 429:
                         logger.warning("sunodownload.io возвращает 429 (лимит запросов).")
                         return None, "Suno Track"
@@ -837,6 +849,9 @@ async def download_direct_from_suno(
             suno_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15),
             allow_redirects=True, ssl=ssl_ctx,
         ) as resp:
+            if resp.status == 404:
+                logger.info("Suno вернул HTTP 404 (трек не найден или удалён): %s", suno_url)
+                raise TrackNotFoundError(f"Suno track not found (HTTP 404): {suno_url}")
             final_url = str(resp.url)
             html_text = await resp.text(errors="ignore")
 
@@ -971,9 +986,14 @@ async def download_direct_from_suno(
                                     return mp3_out, title, lyrics, uuid
                                 else:
                                     logger.warning("Ошибка ffmpeg при конвертации декодированного m4a")
+                elif r_resp.status in (403, 404):
+                    logger.info("studio-api rights вернул статус %s (трек приватный или удалён)", r_resp.status)
+                    raise TrackNotFoundError(f"studio-api rights returned {r_resp.status}")
                 else:
                     logger.warning("studio-api rights вернул статус %s", r_resp.status)
 
+    except TrackNotFoundError:
+        raise
     except Exception as e:
         logger.warning("Прямое скачивание Suno не удалось: %s", e, exc_info=True)
 
@@ -1042,18 +1062,28 @@ async def _download_and_send(
         # ── 1. Прямая загрузка с Suno через ffmpeg (основной метод) ───────────
         lyrics = None
         resolved_uuid = None
-        async with SEMAPHORE:
-            raw_audio, title, lyrics, resolved_uuid = await download_direct_from_suno(suno_url, HTTP_SESSION)
+        is_not_found = False
+        try:
+            async with SEMAPHORE:
+                raw_audio, title, lyrics, resolved_uuid = await download_direct_from_suno(suno_url, HTTP_SESSION)
+        except TrackNotFoundError:
+            is_not_found = True
 
         # ── 2. Резерв через sunodownload.io если прямой метод не сработал ──────
-        if not raw_audio:
+        if not raw_audio and not is_not_found:
             logger.info("Пробуем резервный метод через sunodownload.io")
-            async with SEMAPHORE:
-                raw_audio, title = await convert_and_download_mp3(suno_url, HTTP_SESSION)
+            try:
+                async with SEMAPHORE:
+                    raw_audio, title = await convert_and_download_mp3(suno_url, HTTP_SESSION)
+            except TrackNotFoundError:
+                is_not_found = True
 
         if not raw_audio:
-            await status_msg.edit_text(t["error_download"], parse_mode="HTML")
-            await notify_admin_error("_download_and_send:download_failed", Exception("Не удалось скачать трек через Suno CDN и sunodownload.io"), f"URL: {suno_url}")
+            if is_not_found:
+                await status_msg.edit_text(t.get("error_track_not_found", t["error_download"]), parse_mode="HTML")
+            else:
+                await status_msg.edit_text(t["error_download"], parse_mode="HTML")
+                await notify_admin_error("_download_and_send:download_failed", Exception("Не удалось скачать трек через Suno CDN и sunodownload.io"), f"URL: {suno_url}")
             return False
 
         original_song_id = song_id
@@ -1093,6 +1123,12 @@ async def _download_and_send(
         delete_status = True
         return True
 
+    except TrackNotFoundError:
+        try:
+            await status_msg.edit_text(t.get("error_track_not_found", t["error_download"]), parse_mode="HTML")
+        except Exception:
+            pass
+        return False
     except Exception as e:
         logger.error("Ошибка пайплайна: %s", e, exc_info=True)
         await notify_admin_error("_download_and_send:exception", e, f"URL: {suno_url}")
@@ -1221,16 +1257,41 @@ async def cmd_stats(message: types.Message):
     if not is_admin(message.from_user.id):
         return
     s = await database.get_stats()
-    await message.answer(
-        f"📊 <b>Статистика SunoSaver</b>\n\n"
-        f"👥 Всего пользователей: <b>{s['total_users']:,}</b>\n"
-        f"🎁 По рефералке:        <b>{s['referral_users']:,}</b>\n"
-        f"⭐️ PRO-аккаунтов:       <b>{s['pro_users']:,}</b>\n"
-        f"🎵 Треков скачано:      <b>{s['total_downloads']:,}</b>\n"
-        f"💾 В кэше:              <b>{s['cached_tracks']:,}</b>\n"
-        f"🚫 Заблокировано:       <b>{s['banned_users']:,}</b>",
-        parse_mode="HTML",
+
+    lang_map = {
+        "ru": ("🇷🇺", "Русский"),
+        "kk": ("🇰🇿", "Қазақша"),
+        "en": ("🇬🇧", "English"),
+    }
+    lang_lines = []
+    for item in s.get("languages", []):
+        code = item["lang"]
+        flag, name = lang_map.get(code, ("🌐", code.upper()))
+        lang_lines.append(f"  {flag} {name}: <b>{item['count']}</b> ({item['percent']}%)")
+    lang_text = "\n".join(lang_lines) if lang_lines else "  —"
+
+    text = (
+        f"📊 <b>Аналитика & Статистика SunoSaver</b>\n\n"
+        f"👥 <b>Пользователи:</b>\n"
+        f"• Всего пользователей: <b>{s['total_users']:,}</b>\n"
+        f"• Новых за 24 часа: <b>+{s['new_users_24h']:,}</b>\n"
+        f"• Активных сегодня: <b>{s['active_users_today']:,}</b>\n"
+        f"• Пришло по рефералке: <b>{s['referral_users']:,}</b>\n"
+        f"• PRO-аккаунтов: <b>{s['pro_users']:,}</b>\n"
+        f"• Заблокировано: <b>{s['banned_users']:,}</b>\n\n"
+        f"🌍 <b>Языки аудитории:</b>\n"
+        f"{lang_text}\n\n"
+        f"⚡️ <b>Активность за сегодня:</b>\n"
+        f"• Скачиваний MP3: <b>{s['downloads_today']:,}</b>\n"
+        f"• Создано миксов: <b>{s['mixes_today']:,}</b>\n"
+        f"• Конвертаций в WAV: <b>{s['wav_today']:,}</b>\n\n"
+        f"💾 <b>Кэш и База данных:</b>\n"
+        f"• Скачано за всё время: <b>{s['total_downloads']:,}</b>\n"
+        f"• В кэше MP3 треков: <b>{s['cached_tracks']:,}</b>\n"
+        f"• В кэше MP4 (видео): <b>{s['cached_videos']:,}</b>\n"
+        f"• В кэше WAV (HD): <b>{s['cached_wavs']:,}</b>"
     )
+    await message.answer(text, parse_mode="HTML")
 
 
 @dp.message(Command("ban"))
