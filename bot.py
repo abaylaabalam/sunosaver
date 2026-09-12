@@ -79,15 +79,22 @@ class TrackNotFoundError(Exception):
 _admin_error_timestamps: dict[str, float] = {}
 
 
-async def notify_admin_error(context: str, error: Exception, extra_info: str = ""):
-    """Отправляет уведомление об ошибке администратору с защитой от спама (1 алерт в 5 минут на тип ошибки)."""
+async def notify_admin_error(
+    context: str,
+    error: Exception | str,
+    extra_info: str = "",
+    user: types.User | int | None = None,
+):
+    """Отправляет уведомление об ошибке администратору с информацией о пользователе и защитой от спама."""
     if not ADMIN_ID:
         return
 
-    key = f"{context}:{type(error).__name__}"
+    err_type = type(error).__name__ if isinstance(error, Exception) else "Error"
+    u_id = user.id if isinstance(user, types.User) else (user if isinstance(user, int) else 0)
+    key = f"{context}:{err_type}:{u_id}"
     now = time.time()
     last_sent = _admin_error_timestamps.get(key, 0)
-    if now - last_sent < 300:  # не чаще 1 раза в 5 минут
+    if now - last_sent < 60:  # не чаще 1 раза в минуту для одного пользователя и ошибки
         return
     _admin_error_timestamps[key] = now
 
@@ -95,10 +102,23 @@ async def notify_admin_error(context: str, error: Exception, extra_info: str = "
     if len(err_text) > 400:
         err_text = err_text[:400] + "..."
 
+    # Формируем блок пользователя
+    user_str = "<i>Системный процесс</i>"
+    if isinstance(user, types.User):
+        name_parts = [user.first_name or "", user.last_name or ""]
+        full_name = html.escape(" ".join(p for p in name_parts if p).strip() or "Пользователь")
+        if user.username:
+            user_str = f"@{user.username} (ID: <code>{user.id}</code>, {full_name})"
+        else:
+            user_str = f'<a href="tg://user?id={user.id}">{full_name}</a> (ID: <code>{user.id}</code>, без @username)'
+    elif isinstance(user, int) and user > 0:
+        user_str = f'<a href="tg://user?id={user}">ID {user}</a>'
+
     msg = (
         f"🚨 <b>Алерт SunoSaver</b>\n\n"
+        f"👤 <b>Пользователь:</b> {user_str}\n"
         f"📍 <b>Контекст:</b> {html.escape(context)}\n"
-        f"⚠️ <b>Тип:</b> <code>{type(error).__name__}</code>\n"
+        f"⚠️ <b>Тип:</b> <code>{html.escape(err_type)}</code>\n"
         f"📝 <b>Ошибка:</b> <code>{html.escape(err_text)}</code>"
     )
     if extra_info:
@@ -1167,10 +1187,11 @@ async def _download_and_send(
             if is_not_found:
                 err_text = t.get("error_track_not_found", t["error_download"]) + t.get("error_contact", "")
                 await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+                await notify_admin_error("_download_and_send:track_not_found", TrackNotFoundError("Трек не найден на Suno"), f"URL: {suno_url}", user=message.from_user)
             else:
                 err_text = t["error_download"] + t.get("error_contact", "")
                 await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
-                await notify_admin_error("_download_and_send:download_failed", Exception("Не удалось скачать трек через Suno CDN и sunodownload.io"), f"URL: {suno_url}")
+                await notify_admin_error("_download_and_send:download_failed", Exception("Не удалось скачать трек через Suno CDN и sunodownload.io"), f"URL: {suno_url}", user=message.from_user)
             return False
 
         original_song_id = song_id
@@ -1211,16 +1232,17 @@ async def _download_and_send(
         delete_status = True
         return True
 
-    except TrackNotFoundError:
+    except TrackNotFoundError as e:
         try:
             err_text = t.get("error_track_not_found", t["error_download"]) + t.get("error_contact", "")
             await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+            await notify_admin_error("_download_and_send:track_not_found", e, f"URL: {suno_url}", user=message.from_user)
         except Exception:
             pass
         return False
     except Exception as e:
         logger.error("Ошибка пайплайна: %s", e, exc_info=True)
-        await notify_admin_error("_download_and_send:exception", e, f"URL: {suno_url}")
+        await notify_admin_error("_download_and_send:exception", e, f"URL: {suno_url}", user=message.from_user)
         err_text = t["error_telegram"] + t.get("error_contact", "")
         try:
             await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
@@ -2300,7 +2322,7 @@ async def handle_mix_mode(callback: CallbackQuery):
     except Exception as e:
         logger.error("Ошибка при создании микса: %s", e, exc_info=True)
         if not isinstance(e, TrackNotFoundError):
-            await notify_admin_error("handle_mix_mode", e, f"tracks: {len(queue)}, mode: {mode}")
+            await notify_admin_error("handle_mix_mode", e, f"tracks: {len(queue)}, mode: {mode}", user=callback.from_user)
         try:
             err_text = t["mix_error"] + t.get("error_contact", "")
             await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
@@ -2595,6 +2617,7 @@ async def handle_wav_callback(callback: CallbackQuery):
         if not wav_bytes:
             err_text = t["wav_error"] + t.get("error_contact", "")
             await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+            await notify_admin_error("handle_wav_callback:wav_failed", Exception("Не удалось сгенерировать WAV"), f"song_id: {song_id}", user=callback.from_user)
             return
 
         if extracted_title and extracted_title != "Suno Track":
@@ -2634,7 +2657,7 @@ async def handle_wav_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error("Ошибка отправки WAV: %s", e, exc_info=True)
-        await notify_admin_error("handle_wav_callback", e, f"song_id: {song_id}")
+        await notify_admin_error("handle_wav_callback", e, f"song_id: {song_id}", user=callback.from_user)
         try:
             err_text = t["wav_error"] + t.get("error_contact", "")
             await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
@@ -2878,6 +2901,7 @@ async def handle_video_callback(callback: CallbackQuery):
         if not video_res:
             err_text = t["video_error"] + t.get("error_contact", "")
             await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+            await notify_admin_error("handle_video_callback:video_failed", Exception("Не удалось собрать видео"), f"song_id: {song_id}", user=callback.from_user)
             return
 
         if extracted_title and extracted_title != "Suno Track":
@@ -2920,7 +2944,7 @@ async def handle_video_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error("Ошибка отправки видео: %s", e, exc_info=True)
-        await notify_admin_error("handle_video_callback", e, f"song_id: {song_id}")
+        await notify_admin_error("handle_video_callback", e, f"song_id: {song_id}", user=callback.from_user)
         try:
             err_text = t["video_error"] + t.get("error_contact", "")
             await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
