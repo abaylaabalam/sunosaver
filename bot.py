@@ -45,6 +45,8 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан в файле .env!")
 
 CHANNEL_URL          = os.getenv("CHANNEL_URL", "https://t.me/youtubestantg")
+SUPPORT_USERNAME     = os.getenv("SUPPORT_USERNAME", "youtubestanmanager")
+SUPPORT_URL          = f"https://t.me/{SUPPORT_USERNAME}"
 MAX_CONCURRENT       = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", 5))
 RATE_LIMIT_SECONDS   = int(os.getenv("RATE_LIMIT_SECONDS", 10))
 MAX_LINKS_PER_MSG    = int(os.getenv("MAX_LINKS_PER_MESSAGE", 5))
@@ -169,6 +171,7 @@ TEXTS = {
             "Под каждым отправленным MP3 нажмите <b>«📜 Текст песни»</b> для просмотра слов или <b>«🎼 Скачать WAV»</b> для файла студийного качества.\n\n"
             "3️⃣ <b>Создать микс из треков:</b>\n"
             "Нажмите <b>«🎛 Создать микс»</b> (или команда /mix). Выберите до 10 песен и склейте их в один непрерывный аудиофайл (встык или плавный DJ-микс с кроссфейдом)!\n\n"
+            "💬 <b>Служба поддержки:</b> @youtubestanmanager\n\n"
             "📦 <i>Можно отправлять до 5 ссылок в одном сообщении.</i>"
         ),
         "about": (
@@ -182,7 +185,8 @@ TEXTS = {
             "• ⚡️ <b>Умный кэш</b> — мгновенная отдача ранее скачанных треков.\n"
             "• 📦 <b>Пакетная загрузка</b> — до 5 ссылок одновременно в сообщении.\n"
             "• 🌍 <b>Мультиязычность</b> — Русский, English, Қазақша.\n\n"
-            f"📢 <b>Наш официальный канал:</b> {CHANNEL_URL}"
+            f"📢 <b>Наш официальный канал:</b> {CHANNEL_URL}\n"
+            f"💬 <b>Поддержка:</b> @youtubestanmanager"
         ),
         "settings":      "⚙️ <b>Настройки интерфейса</b>\n\nВыберите язык:",
         "lang_changed":  "✅ Язык переключен на <b>Русский</b>!",
@@ -193,6 +197,7 @@ TEXTS = {
         "error_download":"❌ Не удалось скачать трек. Убедитесь, что он публичный.",
         "error_track_not_found": "❌ Трек не найден на Suno.\nВозможно, он был удалён автором или является приватным.",
         "error_telegram":"❌ Ошибка при отправке файла. Попробуйте позже.",
+        "error_contact": "\n\n💬 Если возникла ошибка или есть вопрос, напишите: @youtubestanmanager",
         "error_rate_limit": "⏳ Не так быстро! Подождите немного.",
         "banned":        "🚫 <b>Вы заблокированы</b> и не можете использовать бота.",
         "multiple_links":"🔗 Нашёл <b>{count}</b> ссылок. Скачиваю по очереди...",
@@ -319,6 +324,7 @@ TEXTS = {
             "Under each sent MP3, click <b>«📜 Lyrics»</b> to view song words or <b>«🎼 Download WAV»</b> for lossless studio audio.\n\n"
             "3️⃣ <b>Create a Mix:</b>\n"
             "Click <b>«🎛 Create Mix»</b> (or send /mix). Pick up to 10 tracks and stitch them into a single continuous file (Gapless or Smooth DJ Crossfade with timestamps)!\n\n"
+            "💬 <b>Support:</b> @youtubestanmanager\n\n"
             "📦 <i>Up to 5 links in a single message.</i>"
         ),
         "about": (
@@ -332,7 +338,8 @@ TEXTS = {
             "• ⚡️ <b>Smart Cache</b> — instant redelivery of previously requested tracks.\n"
             "• 📦 <b>Batch Downloads</b> — up to 5 links in one message.\n"
             "• 🌍 <b>Multilingual</b> — Russian, English, Kazakh.\n\n"
-            f"📢 <b>Official Channel:</b> {CHANNEL_URL}"
+            f"📢 <b>Official Channel:</b> {CHANNEL_URL}\n"
+            f"💬 <b>Support:</b> @youtubestanmanager"
         ),
         "settings":      "⚙️ <b>Settings</b>\n\nChoose language:",
         "lang_changed":  "✅ Language changed to <b>English</b>!",
@@ -343,6 +350,7 @@ TEXTS = {
         "error_download":"❌ Could not download the track. Make sure it's public.",
         "error_track_not_found": "❌ Track not found on Suno.\nIt may have been deleted by the author or set to private.",
         "error_telegram":"❌ Error delivering file. Please try again later.",
+        "error_contact": "\n\n💬 If an error occurred or you need help: @youtubestanmanager",
         "error_rate_limit": "⏳ Slow down! Please wait a moment.",
         "banned":        "🚫 <b>You are banned</b> and cannot use this bot.",
         "multiple_links":"🔗 Found <b>{count}</b> links. Downloading one by one...",
@@ -469,6 +477,7 @@ TEXTS = {
             "Жіберілген әр әннің астындағы <b>«📜 Ән мәтіні»</b> (сөздерін көру) немесе <b>«🎼 WAV жүктеу»</b> (студиялық таза дыбыс) батырмасын басыңыз.\n\n"
             "3️⃣ <b>Әндерден микс жасау:</b>\n"
             "Мәзірден <b>«🎛 Микс жасау»</b> (немесе /mix пәрмені) таңдаңыз. 10 әнге дейін таңдап, бір тұтас үзіліссіз аудиофайлға біріктіріңіз (кәдімгі немесе DJ Crossfade)!\n\n"
+            "💬 <b>Қолдау қызметі:</b> @youtubestanmanager\n\n"
             "📦 <i>Бір хабарламада 5 сілтемеге дейін жіберуге болады.</i>"
         ),
         "about": (
@@ -482,7 +491,8 @@ TEXTS = {
             "• ⚡️ <b>Ақылды кэш</b> — бұрын жүктелген тректерді қас қағым сәтте қайта жіберу.\n"
             "• 📦 <b>Топтама жүктеу</b> — бір хабарламада бірден 5 сілтемеге дейін.\n"
             "• 🌍 <b>3 тілді толық қолдау</b> — Қазақша, Орысша, Ағылшынша.\n\n"
-            f"📢 <b>Біздің ресми арна:</b> {CHANNEL_URL}"
+            f"📢 <b>Біздің ресми арна:</b> {CHANNEL_URL}\n"
+            f"💬 <b>Қолдау қызметі:</b> @youtubestanmanager"
         ),
         "settings":      "⚙️ <b>Интерфейс баптаулары</b>\n\nТілді таңдаңыз:",
         "lang_changed":  "✅ Тіл <b>Қазақ тіліне</b> ауыстырылды!",
@@ -493,6 +503,7 @@ TEXTS = {
         "error_download":"❌ Тректі жүктеу мүмкін болмады. Оның ашық (public) екеніне көз жеткізіңіз.",
         "error_track_not_found": "❌ Трек Suno-дан табылмады.\nМүмкін, автор оны өшірген немесе жеке (private) жасаған.",
         "error_telegram":"❌ Файлды жіберу кезінде қате орын алды. Кейінірек қайталап көріңіз.",
+        "error_contact": "\n\n💬 Қате шықса немесе сұрағыңыз болса, жазыңыз: @youtubestanmanager",
         "error_rate_limit": "⏳ Тым жылдам! Біраз күте тұрыңыз.",
         "banned":        "🚫 <b>Сіз бұғатталғансыз</b> және ботты қолдана алмайсыз.",
         "multiple_links":"🔗 <b>{count}</b> сілтеме табылды. Кезекпен жүктелуде...",
@@ -726,6 +737,18 @@ def get_language_inline_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🇰🇿 Қазақша", callback_data="set_lang:kk"),
         InlineKeyboardButton(text="🇷🇺 Русский", callback_data="set_lang:ru"),
         InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang:en"),
+    ]])
+
+
+def get_support_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
+    texts = {
+        "ru": "💬 Написать в поддержку",
+        "kk": "💬 Қолдау қызметіне жазу",
+        "en": "💬 Contact Support",
+    }
+    btn_text = texts.get(lang, texts["ru"])
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=btn_text, url=SUPPORT_URL)
     ]])
 
 
@@ -1082,9 +1105,11 @@ async def _download_and_send(
 
         if not raw_audio:
             if is_not_found:
-                await status_msg.edit_text(t.get("error_track_not_found", t["error_download"]), parse_mode="HTML")
+                err_text = t.get("error_track_not_found", t["error_download"]) + t.get("error_contact", "")
+                await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
             else:
-                await status_msg.edit_text(t["error_download"], parse_mode="HTML")
+                err_text = t["error_download"] + t.get("error_contact", "")
+                await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
                 await notify_admin_error("_download_and_send:download_failed", Exception("Не удалось скачать трек через Suno CDN и sunodownload.io"), f"URL: {suno_url}")
             return False
 
@@ -1127,17 +1152,19 @@ async def _download_and_send(
 
     except TrackNotFoundError:
         try:
-            await status_msg.edit_text(t.get("error_track_not_found", t["error_download"]), parse_mode="HTML")
+            err_text = t.get("error_track_not_found", t["error_download"]) + t.get("error_contact", "")
+            await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
         except Exception:
             pass
         return False
     except Exception as e:
         logger.error("Ошибка пайплайна: %s", e, exc_info=True)
         await notify_admin_error("_download_and_send:exception", e, f"URL: {suno_url}")
+        err_text = t["error_telegram"] + t.get("error_contact", "")
         try:
-            await status_msg.edit_text(t["error_telegram"], parse_mode="HTML")
+            await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
         except Exception:
-            await message.answer(t["error_telegram"], parse_mode="HTML")
+            await message.answer(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
         return False
 
     finally:
@@ -2006,13 +2033,15 @@ async def handle_mix_mode(callback: CallbackQuery):
                 audio_tracks.append((raw_bytes, item_title or item["title"]))
 
         if len(audio_tracks) < 2:
-            await status_msg.edit_text(t["mix_error"], parse_mode="HTML")
+            err_text = t["mix_error"] + t.get("error_contact", "")
+            await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
             return
 
         # Склеиваем треки в ffmpeg
         mix_bytes, tracklist_text = await concatenate_tracks(audio_tracks, mode=mode)
         if not mix_bytes:
-            await status_msg.edit_text(t["mix_error"], parse_mode="HTML")
+            err_text = t["mix_error"] + t.get("error_contact", "")
+            await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
             return
 
         # Прошиваем теги ID3
@@ -2049,7 +2078,8 @@ async def handle_mix_mode(callback: CallbackQuery):
         logger.error("Ошибка при создании микса: %s", e, exc_info=True)
         await notify_admin_error("handle_mix_mode", e, f"tracks: {len(queue)}, mode: {mode}")
         try:
-            await status_msg.edit_text(t["mix_error"], parse_mode="HTML")
+            err_text = t["mix_error"] + t.get("error_contact", "")
+            await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
         except Exception:
             pass
 
@@ -2341,7 +2371,8 @@ async def handle_wav_callback(callback: CallbackQuery):
                 logger.warning("Ошибка конвертации из Telegram MP3: %s", e)
 
         if not wav_bytes:
-            await progress_msg.edit_text(t["wav_error"], parse_mode="HTML")
+            err_text = t["wav_error"] + t.get("error_contact", "")
+            await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
             return
 
         if extracted_title and extracted_title != "Suno Track":
@@ -2371,7 +2402,8 @@ async def handle_wav_callback(callback: CallbackQuery):
         logger.error("Ошибка отправки WAV: %s", e, exc_info=True)
         await notify_admin_error("handle_wav_callback", e, f"song_id: {song_id}")
         try:
-            await progress_msg.edit_text(t["wav_error"], parse_mode="HTML")
+            err_text = t["wav_error"] + t.get("error_contact", "")
+            await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
         except Exception:
             pass
 
@@ -2607,7 +2639,8 @@ async def handle_video_callback(callback: CallbackQuery):
                 return
 
         if not video_res:
-            await progress_msg.edit_text(t["video_error"], parse_mode="HTML")
+            err_text = t["video_error"] + t.get("error_contact", "")
+            await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
             return
 
         if extracted_title and extracted_title != "Suno Track":
@@ -2652,7 +2685,8 @@ async def handle_video_callback(callback: CallbackQuery):
         logger.error("Ошибка отправки видео: %s", e, exc_info=True)
         await notify_admin_error("handle_video_callback", e, f"song_id: {song_id}")
         try:
-            await progress_msg.edit_text(t["video_error"], parse_mode="HTML")
+            err_text = t["video_error"] + t.get("error_contact", "")
+            await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
         except Exception:
             pass
 
