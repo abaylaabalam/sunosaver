@@ -31,7 +31,7 @@ import base64
 import hashlib
 
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, COMM
+from mutagen.id3 import ID3, TIT2, TPE1, COMM, TLEN
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
@@ -679,23 +679,86 @@ def is_admin(user_id: int) -> bool:
     return ADMIN_ID != 0 and user_id == ADMIN_ID
 
 
-def add_id3_tags(audio_bytes: bytes, title: str, artist: str) -> bytes:
-    """Записывает ID3-теги в MP3. При ошибке возвращает исходные байты."""
+async def _convert_audio_to_mp3(input_data: bytes | str, is_url: bool = False) -> bytes | None:
+    """Конвертирует входные аудио/видео данные в MP3 через временный файл на диске.
+    Запись в реальный файл позволяет libmp3lame выполнить seek и записать корректный
+    Xing/VBR заголовок, благодаря чему аудиофайлы отображаются и воспроизводятся
+    с точной полной длительностью в Telegram и любых медиаплеерах."""
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as out_tmp:
+        out_path = out_tmp.name
+
+    in_path = None
+    try:
+        if is_url:
+            cmd = [
+                "ffmpeg", "-y", "-i", str(input_data),
+                "-vn", "-acodec", "libmp3lame", "-q:a", "2",
+                out_path
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            _, stderr = await proc.communicate()
+        else:
+            with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as in_tmp:
+                in_tmp.write(input_data)
+                in_path = in_tmp.name
+            cmd = [
+                "ffmpeg", "-y", "-i", in_path,
+                "-vn", "-acodec", "libmp3lame", "-q:a", "2",
+                out_path
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            _, stderr = await proc.communicate()
+
+        if proc.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
+            with open(out_path, "rb") as f:
+                return f.read()
+        else:
+            err_msg = stderr[-300:].decode(errors="ignore") if stderr else ""
+            logger.warning("Ошибка ffmpeg при конвертации в MP3: code=%s, err=%s", proc.returncode, err_msg)
+            return None
+    except Exception as e:
+        logger.error("Исключение при конвертации в MP3: %s", e)
+        return None
+    finally:
+        if in_path and os.path.exists(in_path):
+            try:
+                os.remove(in_path)
+            except Exception:
+                pass
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except Exception:
+                pass
+
+
+def add_id3_tags(audio_bytes: bytes, title: str, artist: str) -> tuple[bytes, int]:
+    """Записывает ID3-теги в MP3 и возвращает (tagged_bytes, duration_seconds).
+    При ошибке возвращает исходные байты и 0."""
     buf = io.BytesIO(audio_bytes)
+    duration_sec = 0
     try:
         audio = MP3(buf, ID3=ID3)
+        if audio.info and audio.info.length:
+            duration_sec = int(round(audio.info.length))
         if audio.tags is None:
             audio.add_tags()
         audio.tags.add(TIT2(encoding=3, text=title))
         audio.tags.add(TPE1(encoding=3, text=artist))
         audio.tags.add(COMM(encoding=3, lang="eng", desc="", text="Downloaded with @sunosaver_bot"))
+        if duration_sec > 0:
+            audio.tags.add(TLEN(encoding=3, text=str(duration_sec * 1000)))
         buf.seek(0)
         audio.save(buf)
         buf.seek(0)
-        return buf.read()
+        return buf.read(), duration_sec
     except Exception as e:
         logger.warning("ID3-теги не записаны: %s", e)
-        return audio_bytes
+        return audio_bytes, duration_sec
 
 
 # ─── Клавиатуры ────────────────────────────────────────────────────────────────
@@ -931,17 +994,10 @@ async def download_direct_from_suno(
             if video_m:
                 mp4_url = video_m.group(1)
                 logger.info("Прямое скачивание с Suno CDN через видео MP4: %s", mp4_url)
-                proc = await asyncio.create_subprocess_exec(
-                    "ffmpeg", "-y", "-i", mp4_url,
-                    "-vn", "-acodec", "libmp3lame", "-q:a", "2",
-                    "-f", "mp3", "pipe:1",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode == 0 and is_valid_mp3(stdout):
-                    logger.info("Прямая конвертация через ffmpeg успешна: %s байт", len(stdout))
-                    return stdout, title, lyrics, uuid
+                mp3_bytes = await _convert_audio_to_mp3(mp4_url, is_url=True)
+                if mp3_bytes and is_valid_mp3(mp3_bytes):
+                    logger.info("Прямая конвертация через ffmpeg успешна: %s байт", len(mp3_bytes))
+                    return mp3_bytes, title, lyrics, uuid
 
             # 2. Прямая загрузка защищённого аудиопотока m4a через официальные гостевые права
             logger.info("Загрузка через аудиопоток m4a для трека %s...", uuid)
@@ -986,29 +1042,25 @@ async def download_direct_from_suno(
                         logger.info("Скачиваем аудиопоток Suno: %s", m4a_url)
                         async with session.get(
                             m4a_url, headers={"User-Agent": "Mozilla/5.0"},
-                            timeout=aiohttp.ClientTimeout(total=30), ssl=ssl_ctx,
+                            timeout=aiohttp.ClientTimeout(total=60, connect=10, sock_read=45), ssl=ssl_ctx,
                         ) as stream_resp:
                             if stream_resp.status == 200:
+                                expected_len = stream_resp.headers.get("Content-Length")
                                 enc_bytes = await stream_resp.read()
-                                cipher = Cipher(algorithms.AES(content_key), modes.CTR(content_iv), backend=default_backend())
-                                dec = cipher.decryptor()
-                                dec_bytes = dec.update(enc_bytes) + dec.finalize()
-
-                                # Конвертируем в MP3
-                                proc = await asyncio.create_subprocess_exec(
-                                    "ffmpeg", "-y", "-i", "pipe:0",
-                                    "-vn", "-acodec", "libmp3lame", "-q:a", "2",
-                                    "-f", "mp3", "pipe:1",
-                                    stdin=asyncio.subprocess.PIPE,
-                                    stdout=asyncio.subprocess.PIPE,
-                                    stderr=asyncio.subprocess.PIPE,
-                                )
-                                mp3_out, mp3_err = await proc.communicate(input=dec_bytes)
-                                if proc.returncode == 0 and is_valid_mp3(mp3_out):
-                                    logger.info("Успешно расшифровано и конвертировано в MP3: %s байт", len(mp3_out))
-                                    return mp3_out, title, lyrics, uuid
+                                if expected_len and len(enc_bytes) < int(expected_len):
+                                    logger.warning("Неполная загрузка m4a: %s из %s байт", len(enc_bytes), expected_len)
                                 else:
-                                    logger.warning("Ошибка ffmpeg при конвертации декодированного m4a")
+                                    cipher = Cipher(algorithms.AES(content_key), modes.CTR(content_iv), backend=default_backend())
+                                    dec = cipher.decryptor()
+                                    dec_bytes = dec.update(enc_bytes) + dec.finalize()
+
+                                    # Конвертируем в MP3 с корректным Xing/VBR заголовком
+                                    mp3_out = await _convert_audio_to_mp3(dec_bytes, is_url=False)
+                                    if mp3_out and is_valid_mp3(mp3_out):
+                                        logger.info("Успешно расшифровано и конвертировано в MP3: %s байт", len(mp3_out))
+                                        return mp3_out, title, lyrics, uuid
+                                    else:
+                                        logger.warning("Ошибка ffmpeg при конвертации декодированного m4a")
                 elif r_resp.status in (403, 404):
                     logger.info("studio-api rights вернул статус %s (трек приватный или удалён)", r_resp.status)
                     raise TrackNotFoundError(f"studio-api rights returned {r_resp.status}")
@@ -1126,7 +1178,7 @@ async def _download_and_send(
         safe_title     = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
         escaped_title  = html.escape(safe_title)
         artist         = "Suno AI (@sunosaver_bot)"
-        tagged_audio   = add_id3_tags(raw_audio, safe_title, artist)
+        tagged_audio, duration_sec = add_id3_tags(raw_audio, safe_title, artist)
         audio_file     = BufferedInputFile(tagged_audio, filename=f"{safe_title}.mp3")
         caption        = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
         reply_markup   = get_track_inline_keyboard(lang, song_id)
@@ -1135,6 +1187,7 @@ async def _download_and_send(
         sent_msg = await message.answer_audio(
             audio=audio_file, caption=caption,
             title=safe_title, performer=artist,
+            duration=duration_sec if duration_sec > 0 else None,
             reply_markup=reply_markup,
             parse_mode="HTML",
         )
@@ -2184,7 +2237,7 @@ async def handle_mix_mode(callback: CallbackQuery):
         mode_label = t["mix_mode_crossfade"] if mode == "crossfade" else t["mix_mode_normal"]
         mix_title = f"Suno Mix ({len(audio_tracks)} tracks)"
         artist = "Suno AI (@sunosaver_bot)"
-        tagged_mix = add_id3_tags(mix_bytes, mix_title, artist)
+        tagged_mix, mix_duration = add_id3_tags(mix_bytes, mix_title, artist)
 
         track_count = len(audio_tracks)
         plural_word = "трека" if 2 <= track_count <= 4 else "треков"
@@ -2201,6 +2254,7 @@ async def handle_mix_mode(callback: CallbackQuery):
             caption=caption,
             title=mix_title,
             performer=artist,
+            duration=mix_duration if mix_duration > 0 else None,
             request_timeout=180,
             parse_mode="HTML",
         )
@@ -2247,55 +2301,53 @@ async def handle_mix_quick(callback: CallbackQuery):
 # ─── Скачивание WAV (WAV Callback) ─────────────────────────────────────────────
 
 async def _pcm_to_wav(input_bytes: bytes) -> bytes | None:
-    """Конвертирует аудиопоток (m4a/mp4/mp3) в PCM WAV.
+    """Конвертирует аудиопоток (m4a/mp4/mp3) в PCM WAV через временный файл на диске
+    (гарантирует корректный RIFF-заголовок и точную длительность).
     Автоматически подбирает частоту дискретизации (48kHz -> 44.1kHz -> 32kHz),
     чтобы размер файла не превышал лимит Telegram Bot API (50 МБ)."""
+    with tempfile.NamedTemporaryFile(suffix=".input", delete=False) as in_f:
+        in_f.write(input_bytes)
+        in_path = in_f.name
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as out_f:
+        out_path = out_f.name
+
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-i", "pipe:0",
-            "-vn", "-c:a", "pcm_s16le", "-ar", "48000",
-            "-f", "wav", "pipe:1",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        wav_out, _ = await proc.communicate(input=input_bytes)
-        if proc.returncode != 0 or len(wav_out) < 1000:
-            return None
-
-        # Лимит 49 МБ для запаса (Telegram Bot API максимум 50 МБ)
-        if len(wav_out) > 49 * 1024 * 1024:
-            logger.info("WAV > 49MB (%s байт), пробуем 44100 Hz", len(wav_out))
+        for rate in ["48000", "44100", "32000"]:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-y", "-i", "pipe:0",
-                "-vn", "-c:a", "pcm_s16le", "-ar", "44100",
-                "-f", "wav", "pipe:1",
-                stdin=asyncio.subprocess.PIPE,
+                "ffmpeg", "-y", "-i", in_path,
+                "-vn", "-c:a", "pcm_s16le", "-ar", rate,
+                out_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            wav_44k, _ = await proc.communicate(input=input_bytes)
-            if proc.returncode == 0 and len(wav_44k) > 1000:
-                wav_out = wav_44k
-
-        if len(wav_out) > 49 * 1024 * 1024:
-            logger.info("WAV всё ещё > 49MB (%s байт), пробуем 32000 Hz", len(wav_out))
-            proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-y", "-i", "pipe:0",
-                "-vn", "-c:a", "pcm_s16le", "-ar", "32000",
-                "-f", "wav", "pipe:1",
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            wav_32k, _ = await proc.communicate(input=input_bytes)
-            if proc.returncode == 0 and len(wav_32k) > 1000:
-                wav_out = wav_32k
-
-        return wav_out if len(wav_out) <= 50 * 1024 * 1024 else None
+            await proc.communicate()
+            if proc.returncode == 0 and os.path.exists(out_path):
+                sz = os.path.getsize(out_path)
+                if 1000 < sz <= 49 * 1024 * 1024:
+                    with open(out_path, "rb") as rf:
+                        return rf.read()
+                elif sz > 49 * 1024 * 1024 and rate != "32000":
+                    logger.info("WAV > 49MB (%s байт) при %s Hz, пробуем меньший битрейт", sz, rate)
+                    continue
+        if os.path.exists(out_path) and 1000 < os.path.getsize(out_path) <= 50 * 1024 * 1024:
+            with open(out_path, "rb") as rf:
+                return rf.read()
+        return None
     except Exception as e:
         logger.warning("Ошибка конвертации в WAV: %s", e)
         return None
+    finally:
+        if os.path.exists(in_path):
+            try:
+                os.remove(in_path)
+            except Exception:
+                pass
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except Exception:
+                pass
 
 
 async def download_direct_wav_from_suno(
@@ -2516,12 +2568,24 @@ async def handle_wav_callback(callback: CallbackQuery):
             escaped_title = html.escape(safe_title)
             caption = f"🎼 <b>{escaped_title} (WAV)</b>\n{t['artist_label']}: {artist}"
 
+        wav_duration = None
+        try:
+            import wave
+            with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+                nframes = wf.getnframes()
+                frate = wf.getframerate()
+                if frate > 0:
+                    wav_duration = int(round(nframes / float(frate)))
+        except Exception:
+            pass
+
         wav_file = BufferedInputFile(wav_bytes, filename=f"{safe_title}.wav")
         sent_msg = await callback.message.reply_audio(
             audio=wav_file,
             caption=caption,
             title=f"{safe_title} (WAV)",
             performer=artist,
+            duration=wav_duration,
             request_timeout=180,
             parse_mode="HTML",
         )

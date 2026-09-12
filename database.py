@@ -309,7 +309,7 @@ async def get_all_users() -> list[int]:
 async def get_cached_track(song_id: str) -> tuple[str, str | None, str | None] | None:
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
-            "SELECT file_id, title, lyrics FROM track_cache WHERE song_id = ?", (song_id,)
+            "SELECT file_id, title, lyrics FROM track_cache WHERE song_id = ? AND file_id IS NOT NULL AND file_id != ''", (song_id,)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
