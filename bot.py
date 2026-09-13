@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter, TelegramAPIError
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter, TelegramAPIError, TelegramEntityTooLarge
 from aiogram.types import (
     BufferedInputFile,
     FSInputFile,
@@ -257,6 +257,7 @@ TEXTS = {
         "mix_btn_back": "⬅️ Назад",
         "mix_processing": "⏳ Склеиваю <b>{count}</b> треков в единый микс...",
         "mix_error": "❌ Не удалось создать микс. Попробуйте снова.",
+        "mix_too_large": "❌ Микс получился слишком большим для Telegram (лимит 50 МБ). Попробуйте уменьшить количество треков.",
         "mix_min_tracks": "⚠️ Выберите хотя бы 2 трека для создания микса!",
         "mix_max_reached": f"⚠️ В микс можно добавить не более {MAX_MIX_TRACKS} треков.",
         "mix_cancelled": "❌ Создание микса закрыто.",
@@ -410,6 +411,7 @@ TEXTS = {
         "mix_btn_back": "⬅️ Back",
         "mix_processing": "⏳ Stitching <b>{count}</b> tracks into a single mix...",
         "mix_error": "❌ Could not create mix. Please try again.",
+        "mix_too_large": "❌ The mix exceeds Telegram's 50 MB limit. Try choosing fewer tracks.",
         "mix_min_tracks": "⚠️ You need at least 2 tracks to create a mix!",
         "mix_max_reached": f"⚠️ You can add up to {MAX_MIX_TRACKS} tracks in a single mix.",
         "mix_cancelled": "❌ Mix builder closed.",
@@ -563,6 +565,7 @@ TEXTS = {
         "mix_btn_back": "⬅️ Артқа",
         "mix_processing": "⏳ <b>{count}</b> трек бір микске біріктірілуде...",
         "mix_error": "❌ Миксті жасау мүмкін болмады. Қайталап көріңіз.",
+        "mix_too_large": "❌ Микс Telegram шегінен (50 МБ) асып кетті. Тректер санын азайтып көріңіз.",
         "mix_min_tracks": "⚠️ Микс жасау үшін кемінде 2 трек таңдау қажет!",
         "mix_max_reached": f"⚠️ Бір микске ең көбі {MAX_MIX_TRACKS} трек қосуға болады.",
         "mix_cancelled": "❌ Микс шебері жабылды.",
@@ -2039,14 +2042,20 @@ async def concatenate_tracks(
                     cur_time += durations[i]
             tracklist_text = "\n".join(tracklist_lines)
 
-            # Динамический битрейт, чтобы микс любой длительности укладывался в лимит Telegram (50 МБ)
-            total_dur = sum(durations)
-            if total_dur > 2400:      # > 40 минут
-                bitrate = "128k"
-            elif total_dur > 1500:    # > 25 минут
-                bitrate = "160k"
-            else:
-                bitrate = "192k"
+            # Динамический расчет безопасного битрейта: цель <= 47.5 МБ (лимит Telegram 50 МБ)
+            total_dur = max(sum(durations), 60.0)
+            target_bits = 47.5 * 1024 * 1024 * 8
+            max_kbps = int(target_bits / total_dur) // 1000
+
+            # Выбираем максимальный стандартный битрейт, укладывающийся в лимит
+            standard_bitrates = [256, 192, 160, 128, 112, 96, 80, 64]
+            chosen_b = 64
+            for b in standard_bitrates:
+                if b <= max_kbps:
+                    chosen_b = b
+                    break
+            bitrate = f"{chosen_b}k"
+            logger.info("Склейка микса (%s треков, ~%.1fs): расчетный max_kbps=%s, выбран битрейт=%s", n, total_dur, max_kbps, bitrate)
 
             cmd = ["ffmpeg", "-y"]
             for f in input_files:
@@ -2079,6 +2088,24 @@ async def concatenate_tracks(
             import subprocess
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if proc.returncode == 0 and os.path.exists(out_file):
+                # Гарантия размера: лимит Telegram Bot API 50 МБ (с запасом 48.5 МБ)
+                max_allowed_bytes = int(48.5 * 1024 * 1024)
+                if os.path.getsize(out_file) > max_allowed_bytes:
+                    logger.warning("Микс получился %s байт (>48.5MB). Автоматически сжимаем...", os.path.getsize(out_file))
+                    for lower_b in ["128k", "96k", "80k", "64k"]:
+                        if os.path.getsize(out_file) <= max_allowed_bytes:
+                            break
+                        compressed_file = os.path.join(td, f"mix_{lower_b}.mp3")
+                        cmp_cmd = [
+                            "ffmpeg", "-y", "-i", out_file,
+                            "-c:a", "libmp3lame", "-b:a", lower_b,
+                            compressed_file
+                        ]
+                        cmp_proc = subprocess.run(cmp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        if cmp_proc.returncode == 0 and os.path.exists(compressed_file):
+                            out_file = compressed_file
+                            logger.info("Сжатие микса в %s: новый размер %s байт", lower_b, os.path.getsize(out_file))
+
                 with open(out_file, "rb") as rf:
                     return rf.read(), tracklist_text
             else:
@@ -2303,6 +2330,19 @@ async def handle_mix_mode(callback: CallbackQuery):
             f"⚡️ @sunosaver_bot"
         )
 
+        # Финальная проверка размера перед отправкой в Telegram (лимит 50 МБ)
+        if len(tagged_mix) > 49 * 1024 * 1024:
+            logger.warning("Микс после тегов превышает 49 МБ (%s байт). Пробуем дополнительно сжать...", len(tagged_mix))
+            compressed_mix = await _convert_audio_to_mp3(tagged_mix, is_url=False)
+            if compressed_mix and len(compressed_mix) <= 49 * 1024 * 1024:
+                tagged_mix, mix_duration = add_id3_tags(compressed_mix, mix_title, artist)
+            elif len(tagged_mix) > 50 * 1024 * 1024:
+                logger.error("Размер микса (%s байт) превышает лимит Telegram Bot API (50 МБ)", len(tagged_mix))
+                err_text = t.get("mix_too_large", t["mix_error"]) + t.get("error_contact", "")
+                await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+                await notify_admin_error("handle_mix_mode:file_too_large", Exception(f"Микс {len(tagged_mix)} байт > 50 МБ"), f"tracks: {len(queue)}, mode: {mode}", user=callback.from_user)
+                return
+
         audio_file = BufferedInputFile(tagged_mix, filename=f"Suno_Mix_{len(audio_tracks)}_tracks.mp3")
         await callback.message.reply_audio(
             audio=audio_file,
@@ -2318,6 +2358,15 @@ async def handle_mix_mode(callback: CallbackQuery):
         _user_mix_queues.pop(user_id, None)
         _user_mix_pages.pop(user_id, None)
         await status_msg.delete()
+
+    except TelegramEntityTooLarge as e:
+        logger.error("TelegramEntityTooLarge при отправке микса: %s", e)
+        await notify_admin_error("handle_mix_mode:entity_too_large", e, f"tracks: {len(queue)}, mode: {mode}", user=callback.from_user)
+        try:
+            err_text = t.get("mix_too_large", t["mix_error"]) + t.get("error_contact", "")
+            await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+        except Exception:
+            pass
 
     except Exception as e:
         logger.error("Ошибка при создании микса: %s", e, exc_info=True)
