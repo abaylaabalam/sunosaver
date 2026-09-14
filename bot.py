@@ -962,115 +962,148 @@ async def download_direct_from_suno(
     }
     uuid = None
     try:
-        async with session.get(
-            suno_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15),
-            allow_redirects=True, ssl=ssl_ctx,
-        ) as resp:
-            if resp.status == 404:
-                logger.info("Suno вернул HTTP 404 (трек не найден или удалён): %s", suno_url)
-                raise TrackNotFoundError(f"Suno track not found (HTTP 404): {suno_url}")
-            final_url = str(resp.url)
-            html_text = await resp.text(errors="ignore")
+        final_url = suno_url
+        html_text = ""
+        for page_attempt in range(1, 3):
+            try:
+                async with session.get(
+                    suno_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15),
+                    allow_redirects=True, ssl=ssl_ctx,
+                ) as resp:
+                    if resp.status == 404:
+                        logger.info("Suno вернул HTTP 404 (трек не найден или удалён): %s", suno_url)
+                        raise TrackNotFoundError(f"Suno track not found (HTTP 404): {suno_url}")
+                    if resp.status == 200:
+                        final_url = str(resp.url)
+                        html_text = await resp.text(errors="ignore")
+                        break
+                    else:
+                        logger.warning("Suno страница вернула HTTP %s (попытка %s/2)", resp.status, page_attempt)
+            except TrackNotFoundError:
+                raise
+            except Exception as page_err:
+                logger.warning("Ошибка запроса страницы Suno (попытка %s/2): %s", page_attempt, page_err)
+            if page_attempt < 2:
+                await asyncio.sleep(1.0)
 
-            # Извлекаем UUID песни
-            uuid = extract_song_id(final_url)
-            if not uuid or not UUID_PATTERN.match(uuid):
-                uuid_m = UUID_PATTERN.search(html_text)
-                if uuid_m:
-                    uuid = uuid_m.group(0)
+        # Извлекаем UUID песни
+        uuid = extract_song_id(final_url) or extract_song_id(suno_url)
+        if (not uuid or not UUID_PATTERN.match(uuid)) and html_text:
+            uuid_m = UUID_PATTERN.search(html_text)
+            if uuid_m:
+                uuid = uuid_m.group(0)
 
-            if not uuid:
-                logger.warning("Не удалось извлечь UUID из страницы Suno: %s", final_url)
-                return None, "Suno Track", None, None
+        if not uuid:
+            logger.warning("Не удалось извлечь UUID из страницы Suno: %s", final_url)
+            return None, "Suno Track", None, None
 
-            # Извлекаем название трека
-            title = "Suno Track"
-            og_m = re.search(r'<meta property="og:title" content="([^"]+)"', html_text)
-            if og_m:
-                title = og_m.group(1).replace(" | Suno", "").strip()
-            else:
-                t_m = re.search(r'<title>(.*?)</title>', html_text)
-                if t_m:
-                    title = t_m.group(1).replace(" | Suno", "").strip()
+        # Извлекаем название трека
+        title = "Suno Track"
+        og_m = re.search(r'<meta property="og:title" content="([^"]+)"', html_text)
+        if og_m:
+            title = og_m.group(1).replace(" | Suno", "").strip()
+        else:
+            t_m = re.search(r'<title>(.*?)</title>', html_text)
+            if t_m:
+                title = t_m.group(1).replace(" | Suno", "").strip()
 
-            # Извлекаем текст песни (lyrics / prompt) из HTML
-            lyrics = None
-            prompt_m = re.search(r'"prompt":"((?:[^"\\]|\\.)*)"', html_text)
-            if prompt_m:
-                try:
-                    # декодируем unicode/escape последовательности
-                    raw_prompt = prompt_m.group(1)
-                    lyrics = json.loads(f'"{raw_prompt}"').strip()
-                except Exception:
-                    lyrics = prompt_m.group(1).encode().decode('unicode-escape', errors='ignore').strip()
+        # Извлекаем текст песни (lyrics / prompt) из HTML
+        lyrics = None
+        prompt_m = re.search(r'"prompt":"((?:[^"\\]|\\.)*)"', html_text)
+        if prompt_m:
+            try:
+                # декодируем unicode/escape последовательности
+                raw_prompt = prompt_m.group(1)
+                lyrics = json.loads(f'"{raw_prompt}"').strip()
+            except Exception:
+                lyrics = prompt_m.group(1).encode().decode('unicode-escape', errors='ignore').strip()
 
-            # Если в HTML текст не найден, пробуем studio-api clip
-            if not lyrics and uuid:
-                try:
-                    async with session.get(
-                        f"https://studio-api.prod.suno.com/api/clip/{uuid}",
-                        headers={"User-Agent": "Mozilla/5.0"},
-                        timeout=aiohttp.ClientTimeout(total=5), ssl=ssl_ctx,
-                    ) as clip_resp:
-                        if clip_resp.status == 200:
-                            clip_data = await clip_resp.json()
-                            lyrics = clip_data.get("metadata", {}).get("prompt")
-                            if lyrics:
-                                lyrics = lyrics.strip()
-                except Exception:
-                    pass
+        # Если в HTML текст не найден, пробуем studio-api clip
+        if not lyrics and uuid:
+            try:
+                async with session.get(
+                    f"https://studio-api.prod.suno.com/api/clip/{uuid}",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=aiohttp.ClientTimeout(total=5), ssl=ssl_ctx,
+                ) as clip_resp:
+                    if clip_resp.status == 200:
+                        clip_data = await clip_resp.json()
+                        lyrics = clip_data.get("metadata", {}).get("prompt")
+                        if lyrics:
+                            lyrics = lyrics.strip()
+            except Exception:
+                pass
 
-            # 1. Проверяем наличие видео MP4 на Suno CDN
-            video_m = re.search(r'"video_url":"(https://[^"]+\.mp4)"', html_text)
-            if video_m:
-                mp4_url = video_m.group(1)
-                logger.info("Прямое скачивание с Suno CDN через видео MP4: %s", mp4_url)
-                mp3_bytes = await _convert_audio_to_mp3(mp4_url, is_url=True)
-                if mp3_bytes and is_valid_mp3(mp3_bytes):
-                    logger.info("Прямая конвертация через ffmpeg успешна: %s байт", len(mp3_bytes))
-                    return mp3_bytes, title, lyrics, uuid
+        # 1. Проверяем наличие видео MP4 на Suno CDN
+        video_m = re.search(r'"video_url":"(https://[^"]+\.mp4)"', html_text)
+        if video_m:
+            mp4_url = video_m.group(1)
+            logger.info("Прямое скачивание с Suno CDN через видео MP4: %s", mp4_url)
+            mp3_bytes = await _convert_audio_to_mp3(mp4_url, is_url=True)
+            if mp3_bytes and is_valid_mp3(mp3_bytes):
+                logger.info("Прямая конвертация через ffmpeg успешна: %s байт", len(mp3_bytes))
+                return mp3_bytes, title, lyrics, uuid
 
-            # 2. Прямая загрузка защищённого аудиопотока m4a через официальные гостевые права
-            logger.info("Загрузка через аудиопоток m4a для трека %s...", uuid)
-            rights_url = "https://studio-api.prod.suno.com/api/mango/rights"
-            rights_payload = {"content_params": {"content_id": uuid, "content_type": "clip"}}
-            rights_headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                "Origin": "https://suno.com",
-                "Referer": "https://suno.com/",
-            }
+        # 2. Прямая загрузка защищённого аудиопотока m4a через официальные гостевые права
+        logger.info("Загрузка через аудиопоток m4a для трека %s...", uuid)
+        rights_url = "https://studio-api.prod.suno.com/api/mango/rights"
+        rights_payload = {"content_params": {"content_id": uuid, "content_type": "clip"}}
+        rights_headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "Origin": "https://suno.com",
+            "Referer": "https://suno.com/",
+        }
 
-            async with session.post(
-                rights_url, json=rights_payload, headers=rights_headers,
-                timeout=aiohttp.ClientTimeout(total=10), ssl=ssl_ctx,
-            ) as r_resp:
-                if r_resp.status == 200:
-                    rights = await r_resp.json()
-                    glt = rights.get("glt")
-                    wrapped_key_b64 = rights.get("key")
-                    wrapped_iv_b64 = rights.get("iv")
+        rights = None
+        for r_attempt in range(1, 3):
+            try:
+                async with session.post(
+                    rights_url, json=rights_payload, headers=rights_headers,
+                    timeout=aiohttp.ClientTimeout(total=10), ssl=ssl_ctx,
+                ) as r_resp:
+                    if r_resp.status == 200:
+                        rights = await r_resp.json()
+                        break
+                    elif r_resp.status in (403, 404):
+                        logger.info("studio-api rights вернул статус %s (трек приватный или удалён)", r_resp.status)
+                        raise TrackNotFoundError(f"studio-api rights returned {r_resp.status}")
+                    else:
+                        logger.warning("studio-api rights вернул статус %s (попытка %s/2)", r_resp.status, r_attempt)
+            except TrackNotFoundError:
+                raise
+            except Exception as re_err:
+                logger.warning("studio-api rights ошибка сети (попытка %s/2): %s", r_attempt, re_err)
+            if r_attempt < 2:
+                await asyncio.sleep(1.0)
 
-                    if glt and wrapped_key_b64 and wrapped_iv_b64:
-                        user_key = hashlib.sha256(glt.encode("utf-8")).digest()
-                        wrapped_key = base64.b64decode(wrapped_key_b64)
-                        wrapped_iv = base64.b64decode(wrapped_iv_b64)
-                        aad = uuid.encode("utf-8")
+        if rights:
+            glt = rights.get("glt")
+            wrapped_key_b64 = rights.get("key")
+            wrapped_iv_b64 = rights.get("iv")
 
-                        def _decrypt_gcm(wrapped: bytes) -> bytes:
-                            iv = wrapped[:12]
-                            tag = wrapped[-16:]
-                            ct = wrapped[12:-16]
-                            d = Cipher(algorithms.AES(user_key), modes.GCM(iv, tag), backend=default_backend()).decryptor()
-                            d.authenticate_additional_data(aad)
-                            return d.update(ct) + d.finalize()
+            if glt and wrapped_key_b64 and wrapped_iv_b64:
+                user_key = hashlib.sha256(glt.encode("utf-8")).digest()
+                wrapped_key = base64.b64decode(wrapped_key_b64)
+                wrapped_iv = base64.b64decode(wrapped_iv_b64)
+                aad = uuid.encode("utf-8")
 
-                        content_key = _decrypt_gcm(wrapped_key)
-                        content_iv = _decrypt_gcm(wrapped_iv)
+                def _decrypt_gcm(wrapped: bytes) -> bytes:
+                    iv = wrapped[:12]
+                    tag = wrapped[-16:]
+                    ct = wrapped[12:-16]
+                    d = Cipher(algorithms.AES(user_key), modes.GCM(iv, tag), backend=default_backend()).decryptor()
+                    d.authenticate_additional_data(aad)
+                    return d.update(ct) + d.finalize()
 
-                        # Скачиваем m4a аудиопоток
-                        m4a_url = f"https://d2lwuy8qc234o3.cloudfront.net/1/clip/{uuid}.m4a"
-                        logger.info("Скачиваем аудиопоток Suno: %s", m4a_url)
+                content_key = _decrypt_gcm(wrapped_key)
+                content_iv = _decrypt_gcm(wrapped_iv)
+
+                # Скачиваем m4a аудиопоток с CloudFront с повторными попытками
+                m4a_url = f"https://d2lwuy8qc234o3.cloudfront.net/1/clip/{uuid}.m4a"
+                logger.info("Скачиваем аудиопоток Suno: %s", m4a_url)
+                for stream_attempt in range(1, 4):
+                    try:
                         async with session.get(
                             m4a_url, headers={"User-Agent": "Mozilla/5.0"},
                             timeout=aiohttp.ClientTimeout(total=60, connect=10, sock_read=45), ssl=ssl_ctx,
@@ -1079,7 +1112,7 @@ async def download_direct_from_suno(
                                 expected_len = stream_resp.headers.get("Content-Length")
                                 enc_bytes = await stream_resp.read()
                                 if expected_len and len(enc_bytes) < int(expected_len):
-                                    logger.warning("Неполная загрузка m4a: %s из %s байт", len(enc_bytes), expected_len)
+                                    logger.warning("Неполная загрузка m4a (попытка %s/3): %s из %s байт", stream_attempt, len(enc_bytes), expected_len)
                                 else:
                                     cipher = Cipher(algorithms.AES(content_key), modes.CTR(content_iv), backend=default_backend())
                                     dec = cipher.decryptor()
@@ -1088,15 +1121,17 @@ async def download_direct_from_suno(
                                     # Конвертируем в MP3 с корректным Xing/VBR заголовком
                                     mp3_out = await _convert_audio_to_mp3(dec_bytes, is_url=False)
                                     if mp3_out and is_valid_mp3(mp3_out):
-                                        logger.info("Успешно расшифровано и конвертировано в MP3: %s байт", len(mp3_out))
+                                        logger.info("Успешно расшифровано и конвертировано в MP3 (попытка %s/3): %s байт", stream_attempt, len(mp3_out))
                                         return mp3_out, title, lyrics, uuid
                                     else:
-                                        logger.warning("Ошибка ffmpeg при конвертации декодированного m4a")
-                elif r_resp.status in (403, 404):
-                    logger.info("studio-api rights вернул статус %s (трек приватный или удалён)", r_resp.status)
-                    raise TrackNotFoundError(f"studio-api rights returned {r_resp.status}")
-                else:
-                    logger.warning("studio-api rights вернул статус %s", r_resp.status)
+                                        logger.warning("Ошибка ffmpeg при конвертации декодированного m4a (попытка %s/3)", stream_attempt)
+                            else:
+                                logger.warning("CloudFront m4a вернул HTTP %s (попытка %s/3)", stream_resp.status, stream_attempt)
+                    except Exception as stream_err:
+                        logger.warning("Ошибка сети при скачивании m4a (попытка %s/3): %s", stream_attempt, stream_err)
+
+                    if stream_attempt < 3:
+                        await asyncio.sleep(stream_attempt * 1.0)
 
     except TrackNotFoundError:
         raise
@@ -1177,7 +1212,29 @@ async def _download_and_send(
         except TrackNotFoundError:
             is_not_found = True
 
-        # ── 2. Резерв через sunodownload.io если прямой метод не сработал ──────
+        # Если первая попытка вернула None (но не 404), пробуем ещё раз с короткой паузой
+        if not raw_audio and not is_not_found:
+            logger.info("Повторная попытка прямой загрузки Suno через 1.5 сек...")
+            await asyncio.sleep(1.5)
+            try:
+                async with SEMAPHORE:
+                    raw_audio, title, lyrics, resolved_uuid = await download_direct_from_suno(suno_url, HTTP_SESSION)
+            except TrackNotFoundError:
+                is_not_found = True
+
+        # ── 2. Резерв через CDN fallback (cdn1.suno.ai) если знаем UUID ────────
+        target_uuid = resolved_uuid or (song_id if (song_id and UUID_PATTERN.match(song_id)) else None)
+        if not raw_audio and not is_not_found and target_uuid:
+            logger.info("Пробуем прямой CDN fallback (cdn1.suno.ai) для %s", target_uuid)
+            try:
+                async with SEMAPHORE:
+                    cdn_audio, _ = await try_cdn_fallback(target_uuid, HTTP_SESSION)
+                    if cdn_audio:
+                        raw_audio = cdn_audio
+            except Exception as cdn_err:
+                logger.warning("Ошибка CDN fallback: %s", cdn_err)
+
+        # ── 3. Резерв через sunodownload.io если остальные методы не сработали ──
         if not raw_audio and not is_not_found:
             logger.info("Пробуем резервный метод через sunodownload.io")
             try:
