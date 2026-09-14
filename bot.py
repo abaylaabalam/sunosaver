@@ -75,6 +75,11 @@ class TrackNotFoundError(Exception):
     pass
 
 
+class TrackStillProcessingError(Exception):
+    """Вызывается, если трек только что создан и ещё генерируется/обрабатывается серверами Suno."""
+    pass
+
+
 # ─── Алерты об ошибках администратору ──────────────────────────────────────────
 _admin_error_timestamps: dict[str, float] = {}
 
@@ -216,6 +221,7 @@ TEXTS = {
         "cdn_fallback":  "🔄 Основной сервис недоступен, пробую резервный CDN...",
         "error_download":"❌ Не удалось скачать трек. Убедитесь, что он публичный.",
         "error_track_not_found": "❌ Трек не найден на Suno.\nВозможно, он был удалён автором или является приватным.",
+        "error_track_processing": "⏳ Трек ещё генерируется или обрабатывается серверами Suno.\nПожалуйста, подождите 20–30 секунд и отправьте ссылку снова!",
         "error_telegram":"❌ Ошибка при отправке файла. Попробуйте позже.",
         "error_contact": "\n\n💬 Если возникла ошибка или есть вопрос, напишите: @youtubestanmanager",
         "error_rate_limit": "⏳ Не так быстро! Подождите немного.",
@@ -370,6 +376,7 @@ TEXTS = {
         "cdn_fallback":  "🔄 Main service unavailable, trying fallback CDN...",
         "error_download":"❌ Could not download the track. Make sure it's public.",
         "error_track_not_found": "❌ Track not found on Suno.\nIt may have been deleted by the author or set to private.",
+        "error_track_processing": "⏳ The track is still being generated or processed by Suno servers.\nPlease wait 20–30 seconds and send the link again!",
         "error_telegram":"❌ Error delivering file. Please try again later.",
         "error_contact": "\n\n💬 If an error occurred or you need help: @youtubestanmanager",
         "error_rate_limit": "⏳ Slow down! Please wait a moment.",
@@ -524,6 +531,7 @@ TEXTS = {
         "cdn_fallback":  "🔄 Негізгі қызмет қолжетімсіз, қосалқы CDN тексерілуде...",
         "error_download":"❌ Тректі жүктеу мүмкін болмады. Оның ашық (public) екеніне көз жеткізіңіз.",
         "error_track_not_found": "❌ Трек Suno-дан табылмады.\nМүмкін, автор оны өшірген немесе жеке (private) жасаған.",
+        "error_track_processing": "⏳ Трек әлі Suno серверлерінде өңделуде немесе жасалуда.\n20–30 секунд күтіп, сілтемені қайта жіберіңіз!",
         "error_telegram":"❌ Файлды жіберу кезінде қате орын алды. Кейінірек қайталап көріңіз.",
         "error_contact": "\n\n💬 Қате шықса немесе сұрағыңыз болса, жазыңыз: @youtubestanmanager",
         "error_rate_limit": "⏳ Тым жылдам! Біраз күте тұрыңыз.",
@@ -1102,7 +1110,8 @@ async def download_direct_from_suno(
                 # Скачиваем m4a аудиопоток с CloudFront с повторными попытками
                 m4a_url = f"https://d2lwuy8qc234o3.cloudfront.net/1/clip/{uuid}.m4a"
                 logger.info("Скачиваем аудиопоток Suno: %s", m4a_url)
-                for stream_attempt in range(1, 4):
+                stream_404_count = 0
+                for stream_attempt in range(1, 6):
                     try:
                         async with session.get(
                             m4a_url, headers={"User-Agent": "Mozilla/5.0"},
@@ -1112,7 +1121,7 @@ async def download_direct_from_suno(
                                 expected_len = stream_resp.headers.get("Content-Length")
                                 enc_bytes = await stream_resp.read()
                                 if expected_len and len(enc_bytes) < int(expected_len):
-                                    logger.warning("Неполная загрузка m4a (попытка %s/3): %s из %s байт", stream_attempt, len(enc_bytes), expected_len)
+                                    logger.warning("Неполная загрузка m4a (попытка %s/5): %s из %s байт", stream_attempt, len(enc_bytes), expected_len)
                                 else:
                                     cipher = Cipher(algorithms.AES(content_key), modes.CTR(content_iv), backend=default_backend())
                                     dec = cipher.decryptor()
@@ -1121,19 +1130,27 @@ async def download_direct_from_suno(
                                     # Конвертируем в MP3 с корректным Xing/VBR заголовком
                                     mp3_out = await _convert_audio_to_mp3(dec_bytes, is_url=False)
                                     if mp3_out and is_valid_mp3(mp3_out):
-                                        logger.info("Успешно расшифровано и конвертировано в MP3 (попытка %s/3): %s байт", stream_attempt, len(mp3_out))
+                                        logger.info("Успешно расшифровано и конвертировано в MP3 (попытка %s/5): %s байт", stream_attempt, len(mp3_out))
                                         return mp3_out, title, lyrics, uuid
                                     else:
-                                        logger.warning("Ошибка ffmpeg при конвертации декодированного m4a (попытка %s/3)", stream_attempt)
+                                        logger.warning("Ошибка ffmpeg при конвертации декодированного m4a (попытка %s/5)", stream_attempt)
+                            elif stream_resp.status == 404:
+                                stream_404_count += 1
+                                logger.info("CloudFront m4a вернул 404 (трек ещё генерируется Suno, попытка %s/5)", stream_attempt)
                             else:
-                                logger.warning("CloudFront m4a вернул HTTP %s (попытка %s/3)", stream_resp.status, stream_attempt)
+                                logger.warning("CloudFront m4a вернул HTTP %s (попытка %s/5)", stream_resp.status, stream_attempt)
                     except Exception as stream_err:
-                        logger.warning("Ошибка сети при скачивании m4a (попытка %s/3): %s", stream_attempt, stream_err)
+                        logger.warning("Ошибка сети при скачивании m4a (попытка %s/5): %s", stream_attempt, stream_err)
 
-                    if stream_attempt < 3:
-                        await asyncio.sleep(stream_attempt * 1.0)
+                    if stream_attempt < 5:
+                        delay = stream_attempt * (2.5 if stream_404_count > 0 else 1.0)
+                        await asyncio.sleep(delay)
 
-    except TrackNotFoundError:
+                if stream_404_count >= 3:
+                    # Права получены (трек существует), но CloudFront вернул 404 — трек прямо сейчас генерируется Suno
+                    raise TrackStillProcessingError(f"Track {uuid} is still processing on Suno servers")
+
+    except (TrackNotFoundError, TrackStillProcessingError):
         raise
     except Exception as e:
         logger.warning("Прямое скачивание Suno не удалось: %s", e, exc_info=True)
@@ -1297,6 +1314,14 @@ async def _download_and_send(
             err_text = t.get("error_track_not_found", t["error_download"]) + t.get("error_contact", "")
             await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
             await notify_admin_error("_download_and_send:track_not_found", e, f"URL: {suno_url}", user=message.from_user)
+        except Exception:
+            pass
+        return False
+    except TrackStillProcessingError as e:
+        try:
+            err_text = t.get("error_track_processing", "⏳ Трек ещё генерируется или обрабатывается серверами Suno.\nПожалуйста, подождите 20–30 секунд и отправьте ссылку снова!") + t.get("error_contact", "")
+            await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+            logger.info("Трек ещё генерируется Suno: %s", suno_url)
         except Exception:
             pass
         return False
