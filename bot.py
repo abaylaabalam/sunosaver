@@ -94,6 +94,9 @@ async def notify_admin_error(
     if not ADMIN_ID:
         return
 
+    if isinstance(error, (TrackNotFoundError, TrackStillProcessingError)):
+        return
+
     err_type = type(error).__name__ if isinstance(error, Exception) else "Error"
     u_id = user.id if isinstance(user, types.User) else (user if isinstance(user, int) else 0)
     key = f"{context}:{err_type}:{u_id}"
@@ -1264,7 +1267,6 @@ async def _download_and_send(
             if is_not_found:
                 err_text = t.get("error_track_not_found", t["error_download"]) + t.get("error_contact", "")
                 await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
-                await notify_admin_error("_download_and_send:track_not_found", TrackNotFoundError("Трек не найден на Suno"), f"URL: {suno_url}", user=message.from_user)
             else:
                 err_text = t["error_download"] + t.get("error_contact", "")
                 await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
@@ -1313,7 +1315,6 @@ async def _download_and_send(
         try:
             err_text = t.get("error_track_not_found", t["error_download"]) + t.get("error_contact", "")
             await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
-            await notify_admin_error("_download_and_send:track_not_found", e, f"URL: {suno_url}", user=message.from_user)
         except Exception:
             pass
         return False
