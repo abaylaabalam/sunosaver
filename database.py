@@ -94,11 +94,33 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN referrer_id INTEGER DEFAULT NULL",
             "ALTER TABLE users ADD COLUMN is_pro INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN invited_count INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN source TEXT DEFAULT 'direct'",
+            "ALTER TABLE users ADD COLUMN downloads_count INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN is_subscribed INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN subscribed_at TIMESTAMP DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         ]:
             try:
                 await db.execute(sql)
             except Exception:
                 pass
+
+        # Миграция: заполняем source для пользователей по рефералке
+        try:
+            await db.execute("UPDATE users SET source = 'referral' WHERE referrer_id IS NOT NULL AND (source IS NULL OR source = 'direct')")
+        except Exception:
+            pass
+
+        # Миграция: инициализируем downloads_count из user_tracks для существующих активных пользователей
+        try:
+            await db.execute("""
+                UPDATE users 
+                SET downloads_count = (SELECT COUNT(*) FROM user_tracks WHERE user_tracks.user_id = users.user_id)
+                WHERE (downloads_count IS NULL OR downloads_count = 0)
+                AND EXISTS (SELECT 1 FROM user_tracks WHERE user_tracks.user_id = users.user_id)
+            """)
+        except Exception:
+            pass
 
         await db.commit()
 
@@ -137,19 +159,34 @@ async def register_or_get_user(
     user_id: int,
     fallback_lang: str,
     referrer_id: int | None = None,
+    source: str = "direct",
 ) -> tuple[str, bool, int | None]:
     """
-    Регистрирует или возвращает пользователя.
+    Регистрирует или возвращает пользователя с фиксацией источника трафика.
     Возвращает (language, is_new_user, effective_referrer_id).
     effective_referrer_id будет None, если пользователь уже был в БД или referrer_id невалиден.
     """
+    clean_source = (source or "direct").strip()[:32]
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
-            "SELECT language FROM users WHERE user_id = ?", (user_id,)
+            "SELECT language, source FROM users WHERE user_id = ?", (user_id,)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                return row[0], False, None
+                lang, cur_source = row[0], row[1]
+                # Если источник у существующего пользователя не был задан или был direct, а пришёл конкретный
+                if clean_source != "direct" and (not cur_source or cur_source == "direct"):
+                    await db.execute(
+                        "UPDATE users SET source = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?",
+                        (clean_source, user_id),
+                    )
+                else:
+                    await db.execute(
+                        "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id = ?",
+                        (user_id,),
+                    )
+                await db.commit()
+                return lang, False, None
 
         # Проверяем, что referrer_id существует и не является самим пользователем
         effective_ref = None
@@ -157,13 +194,15 @@ async def register_or_get_user(
             async with db.execute("SELECT 1 FROM users WHERE user_id = ?", (referrer_id,)) as r_cur:
                 if await r_cur.fetchone():
                     effective_ref = referrer_id
+                    if clean_source == "direct":
+                        clean_source = "referral"
 
         await db.execute(
             """
-            INSERT INTO users (user_id, language, referrer_id)
-            VALUES (?, ?, ?)
+            INSERT INTO users (user_id, language, referrer_id, source)
+            VALUES (?, ?, ?, ?)
             """,
-            (user_id, fallback_lang, effective_ref),
+            (user_id, fallback_lang, effective_ref, clean_source),
         )
         await db.commit()
         return fallback_lang, True, effective_ref
@@ -288,6 +327,11 @@ async def increment_daily_usage(user_id: int, action: str):
             ON CONFLICT(user_id, date_str) DO UPDATE SET {col} = {col} + 1
             """,
             (user_id, today),
+        )
+        extra_sql = ", downloads_count = COALESCE(downloads_count, 0) + 1" if action == "downloads" else ""
+        await db.execute(
+            f"UPDATE users SET last_active = CURRENT_TIMESTAMP {extra_sql} WHERE user_id = ?",
+            (user_id,),
         )
         await db.commit()
 
@@ -496,6 +540,53 @@ async def get_stats() -> dict:
             row = await cursor.fetchone()
             cached_wavs = row[0] if row else 0
 
+        # Реальные пользователи (скачали хотя бы 1 трек или есть в личной библиотеке)
+        async with db.execute("""
+            SELECT COUNT(*) FROM users 
+            WHERE (downloads_count IS NOT NULL AND downloads_count > 0)
+               OR EXISTS (SELECT 1 FROM user_tracks WHERE user_tracks.user_id = users.user_id)
+        """) as cursor:
+            row = await cursor.fetchone()
+            real_users = row[0] if row else 0
+
+        # Подтверждённые подписчики среди пользователей бота
+        async with db.execute("SELECT COUNT(*) FROM users WHERE is_subscribed = 1") as cursor:
+            row = await cursor.fetchone()
+            subscribed_users = row[0] if row else 0
+
+        async with db.execute("SELECT COUNT(*) FROM users WHERE is_subscribed = 1 AND subscribed_at >= datetime('now', '-24 hours')") as cursor:
+            row = await cursor.fetchone()
+            subscribed_24h = row[0] if row else 0
+
+        # Активные за последние 7 дней
+        async with db.execute("SELECT COUNT(DISTINCT user_id) FROM daily_usage") as cursor:
+            row = await cursor.fetchone()
+            active_users_7d = row[0] if row else 0
+
+        # Источники трафика (откуда пришли пользователи)
+        async with db.execute("""
+            SELECT 
+                COALESCE(NULLIF(source, ''), 'direct') as src,
+                COUNT(*) as total_count,
+                COUNT(CASE WHEN (downloads_count IS NOT NULL AND downloads_count > 0) OR EXISTS (SELECT 1 FROM user_tracks WHERE user_tracks.user_id = users.user_id) THEN 1 END) as real_count
+            FROM users
+            GROUP BY src
+            ORDER BY total_count DESC
+            LIMIT 15
+        """) as cursor:
+            source_rows = await cursor.fetchall()
+            sources = []
+            for src, count, r_count in source_rows:
+                pct = round((count / total_users * 100), 1) if total_users > 0 else 0
+                real_pct = round((r_count / count * 100), 1) if count > 0 else 0
+                sources.append({
+                    "source": src,
+                    "count": count,
+                    "percent": pct,
+                    "real_count": r_count,
+                    "real_percent": real_pct,
+                })
+
         async with db.execute("SELECT COUNT(*) FROM users WHERE referrer_id IS NOT NULL") as cursor:
             row = await cursor.fetchone()
             referral_users = row[0] if row else 0
@@ -511,14 +602,19 @@ async def get_stats() -> dict:
     return {
         "total_downloads": total_downloads,
         "total_users": total_users,
+        "real_users": real_users,
         "new_users_24h": new_users_24h,
         "active_users_today": active_users_today,
+        "active_users_7d": active_users_7d,
+        "subscribed_users": subscribed_users,
+        "subscribed_24h": subscribed_24h,
         "downloads_today": dl_today,
         "mixes_today": mix_today,
         "wav_today": wav_today,
         "total_mixes": total_mixes,
         "total_wavs": total_wavs,
         "languages": languages,
+        "sources": sources,
         "referral_users": referral_users,
         "pro_users": pro_users,
         "cached_tracks": cached_tracks,
@@ -526,6 +622,94 @@ async def get_stats() -> dict:
         "cached_wavs": cached_wavs,
         "banned_users": banned_count,
     }
+
+
+async def set_user_subscribed(user_id: int, is_sub: bool):
+    """Обновляет статус подписки пользователя на канал и дату фиксации."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        if is_sub:
+            await db.execute(
+                """
+                UPDATE users
+                SET is_subscribed = 1,
+                    subscribed_at = COALESCE(subscribed_at, CURRENT_TIMESTAMP)
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            )
+        else:
+            await db.execute(
+                """
+                UPDATE users
+                SET is_subscribed = 0
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            )
+        await db.commit()
+
+
+async def get_app_setting(key: str, default: str | None = None) -> str | None:
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT value FROM app_settings WHERE key = ?", (key,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else default
+
+
+async def set_app_setting(key: str, value: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        await db.commit()
+
+
+async def record_channel_subscriber_count(current_count: int) -> dict:
+    """
+    Фиксирует текущее число подписчиков канала в базе,
+    сохраняет начальную базу (baseline) и возвращает динамику прироста.
+    """
+    async with aiosqlite.connect(DB_NAME) as db:
+        # 1. Baseline (первоначальное число подписчиков при старте учёта)
+        async with db.execute("SELECT value FROM app_settings WHERE key = 'channel_subs_baseline'") as cur:
+            row = await cur.fetchone()
+            if not row:
+                await db.execute("INSERT INTO app_settings (key, value) VALUES ('channel_subs_baseline', ?)", (str(current_count),))
+                baseline = current_count
+            else:
+                try:
+                    baseline = int(row[0])
+                except Exception:
+                    baseline = current_count
+
+        # 2. Число подписчиков на начало сегодняшнего дня
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today_key = f"channel_subs_start_{today}"
+        async with db.execute("SELECT value FROM app_settings WHERE key = ?", (today_key,)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                await db.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)", (today_key, str(current_count)))
+                today_start = current_count
+            else:
+                try:
+                    today_start = int(row[0])
+                except Exception:
+                    today_start = current_count
+
+        # Актуализируем последнее значение
+        await db.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('channel_subs_latest', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(current_count),),
+        )
+        await db.commit()
+
+        return {
+            "current": current_count,
+            "baseline": baseline,
+            "gained_total": max(0, current_count - baseline),
+            "gained_today": max(0, current_count - today_start),
+        }
 
 
 
@@ -570,6 +754,15 @@ async def save_user_track(user_id: int, song_id: str, title: str):
                 created_at = CURRENT_TIMESTAMP
             """,
             (user_id, song_id, title),
+        )
+        await db.execute(
+            """
+            UPDATE users SET 
+                last_active = CURRENT_TIMESTAMP,
+                downloads_count = COALESCE(downloads_count, 0) + 1
+            WHERE user_id = ?
+            """,
+            (user_id,),
         )
         await db.commit()
 

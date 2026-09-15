@@ -13,7 +13,9 @@ import aiohttp
 import certifi
 from dotenv import load_dotenv
 
-from aiogram import Bot, Dispatcher, types, F
+from typing import Callable, Dict, Any, Awaitable
+from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
+from aiogram.types import TelegramObject
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter, TelegramAPIError, TelegramEntityTooLarge
 from aiogram.types import (
@@ -932,7 +934,7 @@ SUB_CACHE_TTL = 300  # 5 минут
 async def check_user_subscription(user_id: int) -> bool:
     """Проверяет обязательную подписку пользователя на канал.
     Администратор бота всегда имеет доступ.
-    Результат кэшируется на 5 минут для высокой скорости отклика."""
+    Успешная подписка кэшируется на 5 минут для высокой скорости отклика."""
     if not REQUIRED_CHANNEL:
         return True
     if ADMIN_ID and user_id == ADMIN_ID:
@@ -941,14 +943,19 @@ async def check_user_subscription(user_id: int) -> bool:
     now = time.time()
     if user_id in _sub_cache:
         cached_sub, ts = _sub_cache[user_id]
-        if now - ts < SUB_CACHE_TTL:
-            return cached_sub
+        if cached_sub and (now - ts < SUB_CACHE_TTL):
+            return True
 
     try:
         chat_id = int(REQUIRED_CHANNEL) if (REQUIRED_CHANNEL.startswith("-") or (REQUIRED_CHANNEL.isdigit() and len(REQUIRED_CHANNEL) > 5)) else REQUIRED_CHANNEL
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         is_sub = member.status in ("creator", "administrator", "member", "restricted")
-        _sub_cache[user_id] = (is_sub, now)
+        if is_sub:
+            _sub_cache[user_id] = (True, now)
+            asyncio.create_task(database.set_user_subscribed(user_id, True))
+        else:
+            _sub_cache.pop(user_id, None)
+            asyncio.create_task(database.set_user_subscribed(user_id, False))
         return is_sub
     except Exception as e:
         err_msg = str(e).lower()
@@ -956,7 +963,65 @@ async def check_user_subscription(user_id: int) -> bool:
             logger.warning("Бот не добавлен администратором в канал %s! Проверка подписки временно пропущена: %s", REQUIRED_CHANNEL, e)
             return True
         logger.warning("Ошибка проверки подписки для %s: %s", user_id, e)
-        return True
+        return False
+
+
+class SubscriptionMiddleware(BaseMiddleware):
+    """
+    Глобальный middleware: строго требует подписку на канал для ВСЕХ пользователей
+    (как для новых, так и для действующих). Блокирует любые сообщения, нажатия кнопок
+    меню и инлайн-кнопок до момента подписки.
+    """
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        user = data.get("event_from_user")
+        if not user or user.is_bot:
+            return await handler(event, data)
+
+        user_id = user.id
+        if ADMIN_ID and user_id == ADMIN_ID:
+            return await handler(event, data)
+
+        if not REQUIRED_CHANNEL:
+            return await handler(event, data)
+
+        # Разрешаем колбэки проверки подписки и выбора языка
+        if isinstance(event, types.CallbackQuery):
+            if event.data in ("check_sub_again",) or (event.data and event.data.startswith("set_lang:")):
+                return await handler(event, data)
+
+        # Разрешаем команду /start (чтобы зафиксировать реферала и источник трафика)
+        if isinstance(event, types.Message) and event.text and event.text.startswith("/start"):
+            return await handler(event, data)
+
+        # Проверяем подписку пользователя
+        is_sub = await check_user_subscription(user_id)
+        if is_sub:
+            return await handler(event, data)
+
+        # Пользователь не подписан: блокируем выполнение и отправляем требование подписаться
+        lang = await database.get_user_language(user_id, get_lang_fallback(user))
+        t = TEXTS.get(lang, TEXTS["ru"])
+
+        if isinstance(event, types.Message):
+            await event.answer(t["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
+            return
+        elif isinstance(event, types.CallbackQuery):
+            await event.answer(t["sub_failed"], show_alert=True)
+            try:
+                await event.message.answer(t["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
+            except Exception:
+                pass
+            return
+
+
+# Регистрируем middleware для всех сообщений и нажатий инлайн-кнопок
+dp.message.outer_middleware(SubscriptionMiddleware())
+dp.callback_query.outer_middleware(SubscriptionMiddleware())
 
 
 # ─── Загрузка аудио ────────────────────────────────────────────────────────────
@@ -1454,17 +1519,23 @@ async def cmd_start(message: types.Message, command: CommandObject):
     fallback_lang = get_lang_fallback(message.from_user)
 
     referrer_id = None
+    source = "direct"
     if command.args:
-        ref_arg = command.args.strip()
-        if ref_arg.startswith("ref_"):
-            raw_id = ref_arg[4:]
+        raw_arg = command.args.strip()
+        if raw_arg.startswith("ref_"):
+            raw_id = raw_arg[4:]
             if raw_id.isdigit():
                 referrer_id = int(raw_id)
-        elif ref_arg.isdigit():
-            referrer_id = int(ref_arg)
+                source = "referral"
+        elif raw_arg.isdigit():
+            referrer_id = int(raw_arg)
+            source = "referral"
+        else:
+            clean_arg = re.sub(r'[^a-zA-Z0-9_\-]', '', raw_arg)[:32]
+            source = clean_arg if clean_arg else "direct"
 
     lang, is_new, effective_ref = await database.register_or_get_user(
-        user_id, fallback_lang, referrer_id
+        user_id, fallback_lang, referrer_id, source=source
     )
 
     # Если это новый пользователь и у него есть действительный реферер
@@ -1690,12 +1761,60 @@ async def cmd_promo100(message: types.Message):
         parse_mode="HTML",
     )
 
+@dp.message(Command("admin"))
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
     if not is_admin(message.from_user.id):
         return
     s = await database.get_stats()
 
+    # Запрашиваем актуальное количество участников в канале через API Telegram
+    channel_info = None
+    if REQUIRED_CHANNEL:
+        try:
+            chat_id = int(REQUIRED_CHANNEL) if (REQUIRED_CHANNEL.startswith("-") or (REQUIRED_CHANNEL.isdigit() and len(REQUIRED_CHANNEL) > 5)) else REQUIRED_CHANNEL
+            curr_count = await bot.get_chat_member_count(chat_id=chat_id)
+            channel_info = await database.record_channel_subscriber_count(curr_count)
+        except Exception as e:
+            logger.warning("Не удалось получить число участников канала: %s", e)
+
+    # 1. Секция канала и обязательной подписки
+    channel_block = ""
+    if channel_info:
+        gain_sign = "+" if channel_info["gained_total"] >= 0 else ""
+        gain_today_sign = "+" if channel_info["gained_today"] >= 0 else ""
+        sub_pct = round((s["subscribed_users"] / s["total_users"] * 100), 1) if s["total_users"] > 0 else 0
+        channel_block = (
+            f"📢 <b>Канал {REQUIRED_CHANNEL}:</b>\n"
+            f"• Всего в канале: <b>{channel_info['current']:,}</b> подписчиков\n"
+            f"• Прирост подписчиков канала: <b>{gain_sign}{channel_info['gained_total']:,}</b> (за сегодня: <b>{gain_today_sign}{channel_info['gained_today']:,}</b>)\n"
+            f"• Подписано пользователей бота: <b>{s['subscribed_users']:,}</b> ({sub_pct}% базы)\n"
+            f"• Подписалось за последние 24ч: <b>+{s['subscribed_24h']:,}</b>\n\n"
+        )
+
+    # 2. Реальные и неактивные пользователи
+    total_users = s["total_users"]
+    real_users = s["real_users"]
+    real_pct = round((real_users / total_users * 100), 1) if total_users > 0 else 0
+    inactive_users = max(0, total_users - real_users)
+    inactive_pct = round((inactive_users / total_users * 100), 1) if total_users > 0 else 0
+
+    # 3. Источники трафика
+    source_names = {
+        "direct": "🔍 Прямой поиск / Органика",
+        "referral": "👥 Реферальная программа",
+    }
+    source_lines = []
+    for item in s.get("sources", []):
+        src_code = item["source"]
+        name = source_names.get(src_code, f"🔗 {src_code}")
+        source_lines.append(
+            f"  • {name}: <b>{item['count']}</b> ({item['percent']}%) "
+            f"| реальных: <b>{item['real_count']}</b> ({item['real_percent']}%)"
+        )
+    source_text = "\n".join(source_lines) if source_lines else "  • —"
+
+    # 4. Языки
     lang_map = {
         "ru": ("🇷🇺", "Русский"),
         "kk": ("🇰🇿", "Қазақша"),
@@ -1710,13 +1829,18 @@ async def cmd_stats(message: types.Message):
 
     text = (
         f"📊 <b>Аналитика & Статистика SunoSaver</b>\n\n"
-        f"👥 <b>Пользователи:</b>\n"
-        f"• Всего пользователей: <b>{s['total_users']:,}</b>\n"
+        f"{channel_block}"
+        f"👥 <b>Пользователи бота:</b>\n"
+        f"• Всего пользователей: <b>{total_users:,}</b>\n"
+        f"• Реальных (скачивали треки): <b>{real_users:,}</b> ({real_pct}%)\n"
+        f"• Неактивных (только /start): <b>{inactive_users:,}</b> ({inactive_pct}%)\n"
         f"• Новых за 24 часа: <b>+{s['new_users_24h']:,}</b>\n"
         f"• Активных сегодня: <b>{s['active_users_today']:,}</b>\n"
-        f"• Пришло по рефералке: <b>{s['referral_users']:,}</b>\n"
+        f"• Активных за 7 дней: <b>{s['active_users_7d']:,}</b>\n"
         f"• PRO-аккаунтов: <b>{s['pro_users']:,}</b>\n"
         f"• Заблокировано: <b>{s['banned_users']:,}</b>\n\n"
+        f"📍 <b>Откуда пришли пользователи (Источники):</b>\n"
+        f"{source_text}\n\n"
         f"🌍 <b>Языки аудитории:</b>\n"
         f"{lang_text}\n\n"
         f"⚡️ <b>Активность за сегодня:</b>\n"
@@ -1977,6 +2101,7 @@ async def handle_check_sub_callback(callback: CallbackQuery):
     _sub_cache.pop(user_id, None)
     is_sub = await check_user_subscription(user_id)
     if is_sub:
+        await database.set_user_subscribed(user_id, True)
         await callback.answer(t["sub_success"], show_alert=True)
         try:
             await callback.message.delete()
@@ -1986,6 +2111,7 @@ async def handle_check_sub_callback(callback: CallbackQuery):
             t["start"], reply_markup=get_main_menu_keyboard(lang), parse_mode="HTML"
         )
     else:
+        await database.set_user_subscribed(user_id, False)
         await callback.answer(t["sub_failed"], show_alert=True)
 
 
