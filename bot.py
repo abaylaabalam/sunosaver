@@ -2507,7 +2507,8 @@ async def get_track_audio_bytes(song_id: str) -> tuple[bytes | None, str]:
     title = "Suno Track"
     cached = await database.get_cached_track(song_id)
     if cached:
-        fid, cached_title, _ = cached
+        fid = cached[0]
+        cached_title = cached[1]
         if cached_title:
             title = cached_title
         if fid:
