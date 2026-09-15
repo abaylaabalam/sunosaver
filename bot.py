@@ -764,6 +764,27 @@ async def _convert_audio_to_mp3(input_data: bytes | str, is_url: bool = False) -
             _, stderr = await proc.communicate()
 
         if proc.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
+            sz = os.path.getsize(out_path)
+            if sz > 48.5 * 1024 * 1024:
+                logger.info("MP3 превышает 48.5 МБ (%s байт), сжимаем с битрейтом 128k для Telegram...", sz)
+                compressed_out = out_path + ".comp.mp3"
+                c_proc = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-y", "-i", out_path,
+                    "-vn", "-acodec", "libmp3lame", "-b:a", "128k",
+                    compressed_out,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                await c_proc.communicate()
+                if c_proc.returncode == 0 and os.path.exists(compressed_out):
+                    c_sz = os.path.getsize(compressed_out)
+                    if c_sz <= 49.5 * 1024 * 1024:
+                        with open(compressed_out, "rb") as cf:
+                            data = cf.read()
+                        try:
+                            os.remove(compressed_out)
+                        except Exception:
+                            pass
+                        return data
             with open(out_path, "rb") as f:
                 return f.read()
         else:
