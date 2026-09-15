@@ -5,10 +5,12 @@ import logging
 import os
 import re
 import ssl
+import sys
 import tempfile
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import aiohttp
 import certifi
@@ -64,6 +66,7 @@ MAX_MIX_TRACKS       = int(os.getenv("MAX_MIX_TRACKS", 10))
 FREE_DAILY_DOWNLOADS = int(os.getenv("FREE_DAILY_DOWNLOADS", 20))
 FREE_DAILY_MIXES     = int(os.getenv("FREE_DAILY_MIXES", 5))
 FREE_DAILY_WAV       = int(os.getenv("FREE_DAILY_WAV", 1))
+FREE_DAILY_STEMS     = int(os.getenv("FREE_DAILY_STEMS", 1))
 FREE_MAX_MIX_TRACKS  = int(os.getenv("FREE_MAX_MIX_TRACKS", 5))
 REFERRALS_FOR_PRO    = int(os.getenv("REFERRALS_FOR_PRO", 3))
 
@@ -74,6 +77,10 @@ KASPI_NAME           = os.getenv("KASPI_NAME", "Абай А.")
 
 _waiting_donate_stars: dict[int, bool]  = {}
 _last_donate_prompt:   dict[int, float] = {}
+
+# Очередь и семафор нейросети разделения треков (Demucs)
+STEMS_SEMAPHORE = asyncio.Semaphore(1)
+_stems_queue_count: int = 0
 
 # ─── Логирование ───────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -258,6 +265,15 @@ TEXTS = {
         "btn_lyrics":     "📜 Текст песни",
         "btn_wav":        "🎼 Скачать WAV",
         "btn_video":      "🎬 Скачать видео",
+        "btn_stems":      "🎙 Вокал и Минус",
+        "stems_btn_vocals": "🎙 Вокал (Акапелла)",
+        "stems_btn_instrumental": "🎹 Минус (Караоке)",
+        "stems_fetching": "⏳ <b>Разделяем трек на Вокал и Минус...</b>\nНейросеть Demucs обрабатывает аудио. Это займёт 1–2 минуты, вы можете пока пользоваться ботом!",
+        "stems_queued":   "⏳ <b>Вы добавлены в очередь нейросети:</b> #{pos}\nКак только процессор освободится, бот сразу начнёт обработку вашего трека!",
+        "stems_limit_reached": "⭐️ <b>Дневной лимит исчерпан!</b>\n\nБесплатным пользователям доступно <b>{limit}</b> разделение в день.\n\nПолучите <b>PRO-безлимит</b> или пригласите друзей по вашей ссылке:\n👉 <code>{ref_url}</code>",
+        "stems_success_vocals": "🎙 <b>Чистый вокал (Акапелла)</b>\n🎵 {title}\n👤 {artist}",
+        "stems_success_inst": "🎹 <b>Минусовка (Караоке / Инструментал)</b>\n🎵 {title}\n👤 {artist}",
+        "stems_error":    "❌ <b>Не удалось разделить трек.</b>\nПопробуйте ещё раз через пару минут.",
         "lyrics_title":   "📜 <b>Текст песни «{title}»:</b>\n\n{lyrics}",
         "lyrics_none":    "ℹ️ У этого трека нет текста (инструментал).",
         "wav_generating": "⏳ Конвертирую и загружаю WAV (30-50 МБ)...",
@@ -473,6 +489,15 @@ TEXTS = {
         "btn_lyrics":     "📜 Lyrics",
         "btn_wav":        "🎼 Download WAV",
         "btn_video":      "🎬 Download Video",
+        "btn_stems":      "🎙 Vocals & Instrumental",
+        "stems_btn_vocals": "🎙 Vocals (Acapella)",
+        "stems_btn_instrumental": "🎹 Instrumental (Karaoke)",
+        "stems_fetching": "⏳ <b>Separating into Vocals and Instrumental...</b>\nDemucs AI is processing audio. This takes 1–2 minutes, feel free to use the bot in the meantime!",
+        "stems_queued":   "⏳ <b>You are queued in AI processor:</b> #{pos}\nThe bot will start processing your track as soon as CPU frees up!",
+        "stems_limit_reached": "⭐️ <b>Daily limit reached!</b>\n\nFree users get <b>{limit}</b> track separation per day.\n\nGet <b>PRO unlimited</b> or invite friends via your link:\n👉 <code>{ref_url}</code>",
+        "stems_success_vocals": "🎙 <b>Clean Vocals (Acapella)</b>\n🎵 {title}\n👤 {artist}",
+        "stems_success_inst": "🎹 <b>Instrumental (Karaoke)</b>\n🎵 {title}\n👤 {artist}",
+        "stems_error":    "❌ <b>Failed to separate track.</b>\nPlease try again in a few minutes.",
         "lyrics_title":   "📜 <b>Lyrics for «{title}»:</b>\n\n{lyrics}",
         "lyrics_none":    "ℹ️ This track has no lyrics (instrumental).",
         "wav_generating": "⏳ Converting and uploading WAV (30-50 MB)...",
@@ -688,6 +713,15 @@ TEXTS = {
         "btn_lyrics":     "📜 Ән мәтіні",
         "btn_wav":        "🎼 WAV жүктеу",
         "btn_video":      "🎬 Видео жүктеу",
+        "btn_stems":      "🎙 Вокал пен Минус",
+        "stems_btn_vocals": "🎙 Вокал (Акапелла)",
+        "stems_btn_instrumental": "🎹 Минус (Караоке)",
+        "stems_fetching": "⏳ <b>Ән Вокал мен Минусқа бөлінуде...</b>\nDemucs нейрожелісі өңдеуде. Бұл 1–2 минут алады, ботты пайдалана беруіңізге болады!",
+        "stems_queued":   "⏳ <b>Сіз кезекке қосылдыңыз:</b> #{pos}\nПроцессор босаған бойда өңдеу басталады!",
+        "stems_limit_reached": "⭐️ <b>Күндізгі лимит таусылды!</b>\n\nТегін қолданушыларға күніне <b>{limit}</b> рет бөлуге рұқсат етілген.\n\nШексіз <b>PRO</b> мәртебесін алыңыз немесе достарыңызды шақырыңыз:\n👉 <code>{ref_url}</code>",
+        "stems_success_vocals": "🎙 <b>Таза вокал (Акапелла)</b>\n🎵 {title}\n👤 {artist}",
+        "stems_success_inst": "🎹 <b>Минусовка (Караоке / Аспаптық)</b>\n🎵 {title}\n👤 {artist}",
+        "stems_error":    "❌ <b>Әнді бөлу мүмкін болмады.</b>\nБіраздан кейін қайталап көріңіз.",
         "lyrics_title":   "📜 <b>«{title}» әнінің мәтіні:</b>\n\n<blockquote>{lyrics}</blockquote>",
         "lyrics_none":    "ℹ️ Бұл тректің сөзі жоқ (инструментал).",
         "wav_generating": "⏳ WAV пішіміне түрлендіру және жүктеу (30-50 МБ)...",
@@ -1062,6 +1096,9 @@ def get_track_inline_keyboard(
         return None
     t = TEXTS[lang]
     return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=t["btn_stems"], callback_data=f"stems:{song_id}"),
+        ],
         [
             InlineKeyboardButton(text=t["btn_lyrics"], callback_data=f"lyrics:{song_id}"),
             InlineKeyboardButton(text=t["btn_wav"], callback_data=f"wav:{song_id}"),
@@ -3975,6 +4012,232 @@ async def handle_video_callback(callback: CallbackQuery):
             await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
         except Exception:
             pass
+
+# ─── Разделение на Вокал и Минус (Stems: Demucs) ──────────────────────────────
+
+async def separate_stems_demucs(
+    input_file_path: str,
+    output_dir: str,
+) -> tuple[str | None, str | None]:
+    """
+    Запускает Demucs для разделения аудиофайла на вокал и минус (--two-stems=vocals).
+    Возвращает (vocals_mp3_path, instrumental_mp3_path) или (None, None) при ошибке.
+    """
+    cmd = [
+        "nice", "-n", "15",
+        sys.executable, "-m", "demucs",
+        "-n", "htdemucs",
+        "--two-stems=vocals",
+        "--mp3",
+        "--mp3-bitrate", "320",
+        "-o", output_dir,
+        input_file_path,
+    ]
+    try:
+        logger.info("Запуск Demucs для %s...", input_file_path)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.error("Ошибка Demucs (код %s): %s", proc.returncode, stderr.decode(errors="ignore"))
+            return None, None
+
+        track_name = Path(input_file_path).stem
+        track_folder = Path(output_dir) / "htdemucs" / track_name
+        vocals_path = track_folder / "vocals.mp3"
+        inst_path = track_folder / "no_vocals.mp3"
+
+        if vocals_path.exists() and inst_path.exists():
+            logger.info("Demucs успешно разделил трек: %s и %s", vocals_path, inst_path)
+            return str(vocals_path), str(inst_path)
+        else:
+            logger.error("Файлы после разделения Demucs не найдены в %s", track_folder)
+            return None, None
+    except Exception as e:
+        logger.error("Исключение при вызове Demucs: %s", e, exc_info=True)
+        return None, None
+
+
+@dp.callback_query(F.data.startswith("stems:"))
+async def handle_stems_callback(callback: CallbackQuery):
+    global _stems_queue_count
+    user_id = callback.from_user.id
+    song_id = callback.data.split(":", 1)[1]
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+
+    if not await check_user_subscription(user_id):
+        await callback.answer()
+        await callback.message.reply(t["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
+        return
+
+    # Получаем метаданные трека из кэша
+    cached_track = await database.get_cached_track(song_id)
+    title = cached_track[1] if cached_track and cached_track[1] else "Suno Track"
+    safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
+    escaped_title = html.escape(safe_title)
+    artist = (cached_track[3] if cached_track and len(cached_track) > 3 and cached_track[3] else None) or "Suno AI (@sunosaver_bot)"
+
+    # 1. Проверяем кэш стемов
+    cached_stems = await database.get_cached_stems(song_id)
+    if cached_stems:
+        vocals_fid, inst_fid = cached_stems
+        await callback.answer()
+        try:
+            await callback.message.reply_audio(
+                audio=vocals_fid,
+                caption=t["stems_success_vocals"].format(title=escaped_title, artist=artist),
+                title=f"{safe_title} (Vocals)",
+                performer=artist,
+                parse_mode="HTML",
+            )
+            await callback.message.reply_audio(
+                audio=inst_fid,
+                caption=t["stems_success_inst"].format(title=escaped_title, artist=artist),
+                title=f"{safe_title} (Instrumental)",
+                performer=artist,
+                parse_mode="HTML",
+            )
+            return
+        except Exception as e:
+            logger.warning("Кэшированный stems file_id устарел: %s", e)
+
+    # 2. Проверка дневного лимита
+    is_pro = await database.is_user_pro(user_id, admin_id=ADMIN_ID)
+    allowed, _ = await database.check_daily_limit(user_id, "stems", FREE_DAILY_STEMS, is_pro)
+    if not allowed:
+        ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
+        await callback.answer(t["stems_limit_reached"].format(limit=FREE_DAILY_STEMS, ref_url=ref_url), show_alert=True)
+        await callback.message.reply(
+            t["stems_limit_reached"].format(limit=FREE_DAILY_STEMS, ref_url=ref_url),
+            parse_mode="HTML",
+        )
+        return
+
+    # 3. Очередь и семафор
+    await callback.answer()
+    queue_pos = _stems_queue_count
+    status_msg = None
+    if queue_pos > 0:
+        status_msg = await callback.message.reply(t["stems_queued"].format(pos=queue_pos), parse_mode="HTML")
+
+    _stems_queue_count += 1
+    try:
+        async with STEMS_SEMAPHORE:
+            if status_msg:
+                try:
+                    await status_msg.edit_text(t["stems_fetching"], parse_mode="HTML")
+                except Exception:
+                    pass
+            else:
+                status_msg = await callback.message.reply(t["stems_fetching"], parse_mode="HTML")
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                input_file = os.path.join(tmp_dir, f"{song_id}.mp3")
+
+                # Скачиваем оригинал аудио
+                downloaded = False
+                if cached_track and cached_track[0]:
+                    try:
+                        file_info = await bot.get_file(cached_track[0])
+                        await bot.download_file(file_info.file_path, input_file)
+                        downloaded = True
+                    except Exception as dl_err:
+                        logger.warning("Не удалось скачать из Telegram кэша: %s", dl_err)
+
+                if not downloaded:
+                    suno_url = f"https://suno.com/song/{song_id}"
+                    res = await download_direct_from_suno(suno_url, HTTP_SESSION)
+                    raw_audio = res[0]
+                    if raw_audio:
+                        with open(input_file, "wb") as f:
+                            f.write(raw_audio)
+                        downloaded = True
+
+                if not downloaded or not os.path.exists(input_file):
+                    await status_msg.edit_text(t["stems_error"], parse_mode="HTML")
+                    return
+
+                # Запуск разделения нейросетью Demucs
+                vocals_path, inst_path = await separate_stems_demucs(input_file, tmp_dir)
+                if not vocals_path or not inst_path:
+                    await status_msg.edit_text(t["stems_error"], parse_mode="HTML")
+                    return
+
+                # Загружаем обложку трека
+                image_url = cached_track[4] if cached_track and len(cached_track) > 4 else None
+                image_bytes = None
+                if image_url:
+                    try:
+                        image_bytes = await download_image(image_url, HTTP_SESSION)
+                    except Exception:
+                        pass
+
+                # Вшиваем теги и обложку в вокал
+                try:
+                    with open(vocals_path, "rb") as vf:
+                        v_raw = vf.read()
+                    v_tagged, _ = set_mp3_metadata(v_raw, f"{safe_title} (Vocals)", artist, image_bytes)
+                    with open(vocals_path, "wb") as vf:
+                        vf.write(v_tagged)
+                except Exception as tag_err:
+                    logger.warning("Ошибка тегов для вокала: %s", tag_err)
+
+                # Вшиваем теги и обложку в минус
+                try:
+                    with open(inst_path, "rb") as ifile:
+                        i_raw = ifile.read()
+                    i_tagged, _ = set_mp3_metadata(i_raw, f"{safe_title} (Instrumental)", artist, image_bytes)
+                    with open(inst_path, "wb") as ifile:
+                        ifile.write(i_tagged)
+                except Exception as tag_err:
+                    logger.warning("Ошибка тегов для минуса: %s", tag_err)
+
+                # Отправляем оба файла пользователю
+                v_file = FSInputFile(vocals_path, filename=f"{safe_title} (Vocals).mp3")
+                i_file = FSInputFile(inst_path, filename=f"{safe_title} (Instrumental).mp3")
+
+                msg_v = await callback.message.reply_audio(
+                    audio=v_file,
+                    caption=t["stems_success_vocals"].format(title=escaped_title, artist=artist),
+                    title=f"{safe_title} (Vocals)",
+                    performer=artist,
+                    request_timeout=180,
+                    parse_mode="HTML",
+                )
+
+                msg_i = await callback.message.reply_audio(
+                    audio=i_file,
+                    caption=t["stems_success_inst"].format(title=escaped_title, artist=artist),
+                    title=f"{safe_title} (Instrumental)",
+                    performer=artist,
+                    request_timeout=180,
+                    parse_mode="HTML",
+                )
+
+                # Сохраняем в кэш
+                if msg_v.audio and msg_i.audio:
+                    await database.save_track_stems(song_id, msg_v.audio.file_id, msg_i.audio.file_id)
+
+                await database.increment_daily_usage(user_id, "stems")
+
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+
+    except Exception as e:
+        logger.error("Ошибка при разделении стемов: %s", e, exc_info=True)
+        if status_msg:
+            try:
+                await status_msg.edit_text(t["stems_error"], parse_mode="HTML")
+            except Exception:
+                pass
+    finally:
+        _stems_queue_count = max(0, _stems_queue_count - 1)
 
 
 # ─── Обработка Suno-ссылок ─────────────────────────────────────────────────────

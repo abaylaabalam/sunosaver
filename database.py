@@ -27,7 +27,18 @@ async def init_db():
                 downloads_count INTEGER DEFAULT 0,
                 mixes_count     INTEGER DEFAULT 0,
                 wav_count       INTEGER DEFAULT 0,
+                stems_count     INTEGER DEFAULT 0,
                 PRIMARY KEY(user_id, date_str)
+            )
+        """)
+
+        # Таблица стемов (вокал и минус)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS track_stems (
+                song_id              TEXT PRIMARY KEY,
+                vocals_file_id       TEXT NOT NULL,
+                instrumental_file_id TEXT NOT NULL,
+                created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -114,6 +125,7 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN custom_artist TEXT DEFAULT NULL",
             "ALTER TABLE track_cache ADD COLUMN artist TEXT DEFAULT NULL",
             "ALTER TABLE track_cache ADD COLUMN image_url TEXT DEFAULT NULL",
+            "ALTER TABLE daily_usage ADD COLUMN stems_count INTEGER DEFAULT 0",
         ]:
             try:
                 await db.execute(sql)
@@ -291,13 +303,14 @@ async def get_user_pro_info(
                 invited_count = row[1] or 0
 
         async with db.execute(
-            "SELECT downloads_count, mixes_count, wav_count FROM daily_usage WHERE user_id = ? AND date_str = ?",
+            "SELECT downloads_count, mixes_count, wav_count, stems_count FROM daily_usage WHERE user_id = ? AND date_str = ?",
             (user_id, today),
         ) as cursor:
             u_row = await cursor.fetchone()
             dl_today = u_row[0] if u_row else 0
             mix_today = u_row[1] if u_row else 0
             wav_today = u_row[2] if u_row else 0
+            stems_today = u_row[3] if u_row and len(u_row) > 3 else 0
 
     needed = max(0, required_referrals - invited_count)
     return {
@@ -307,6 +320,7 @@ async def get_user_pro_info(
         "downloads_today": dl_today,
         "mixes_today": mix_today,
         "wav_today": wav_today,
+        "stems_today": stems_today,
     }
 
 
@@ -392,6 +406,36 @@ async def get_top_donators(limit: int = 5) -> list[dict]:
         ) as cursor:
             rows = await cursor.fetchall()
             return [{"username": r[0], "amount": r[1]} for r in rows]
+
+
+async def get_cached_stems(song_id: str) -> tuple[str, str] | None:
+    """Возвращает (vocals_file_id, instrumental_file_id) если стемы есть в кэше."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT vocals_file_id, instrumental_file_id FROM track_stems WHERE song_id = ?",
+            (song_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0] and row[1]:
+                return (row[0], row[1])
+    return None
+
+
+async def save_track_stems(song_id: str, vocals_file_id: str, instrumental_file_id: str):
+    """Сохраняет file_id вокала и минуса в кэш."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO track_stems (song_id, vocals_file_id, instrumental_file_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT(song_id) DO UPDATE SET
+                vocals_file_id = excluded.vocals_file_id,
+                instrumental_file_id = excluded.instrumental_file_id,
+                created_at = CURRENT_TIMESTAMP
+            """,
+            (song_id, vocals_file_id, instrumental_file_id),
+        )
+        await db.commit()
 
 
 
