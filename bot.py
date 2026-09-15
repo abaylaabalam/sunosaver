@@ -1935,6 +1935,11 @@ async def cmd_start(message: types.Message, command: CommandObject):
         await message.answer(TEXTS[lang]["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
         return
 
+    if command.args and command.args.strip() == "donate":
+        t = TEXTS.get(lang, TEXTS["ru"])
+        await message.answer(t["donate_title"], reply_markup=get_donate_inline_keyboard(lang), parse_mode="HTML")
+        return
+
     await message.answer(TEXTS[lang]["start"], reply_markup=get_main_menu_keyboard(lang), parse_mode="HTML")
 
 
