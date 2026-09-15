@@ -45,6 +45,9 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан в файле .env!")
 
 CHANNEL_URL          = os.getenv("CHANNEL_URL", "https://t.me/youtubestantg")
+REQUIRED_CHANNEL     = os.getenv("REQUIRED_CHANNEL", "@youtubestantg").strip()
+if REQUIRED_CHANNEL.startswith("https://t.me/"):
+    REQUIRED_CHANNEL = "@" + REQUIRED_CHANNEL.split("https://t.me/")[1].strip("/")
 SUPPORT_USERNAME     = os.getenv("SUPPORT_USERNAME", "youtubestanmanager")
 SUPPORT_URL          = f"https://t.me/{SUPPORT_USERNAME}"
 MAX_CONCURRENT       = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", 5))
@@ -254,6 +257,15 @@ TEXTS = {
         "btn_about":     "ℹ️ О боте",
         "btn_channel":   "📢 Наш канал",
         "btn_go_channel":"➡️ Перейти в канал",
+        "sub_required": (
+            "📢 <b>Подпишитесь на наш канал, чтобы пользоваться ботом!</b>\n\n"
+            "Подписка бесплатная и открывает полный доступ к скачиванию песен, студийному WAV, видео и созданию миксов.\n\n"
+            "Подпишитесь на канал ниже и нажмите <b>«✅ Я подписался»</b>:"
+        ),
+        "btn_sub_channel": "📢 Подписаться на канал",
+        "btn_check_sub":   "✅ Я подписался",
+        "sub_success":     "✅ Спасибо за подписку! Теперь все функции бота вам доступны.",
+        "sub_failed":      "❌ Вы ещё не подписались на канал! Пожалуйста, перейдите в канал, нажмите «Подписаться» и попробуйте снова.",
         "btn_create_mix": "🎛 Создать микс",
         "mix_menu_title": (
             "🎛 <b>Конструктор миксов Suno</b>\n\n"
@@ -410,6 +422,15 @@ TEXTS = {
         "btn_about":     "ℹ️ About",
         "btn_channel":   "📢 Our Channel",
         "btn_go_channel":"➡️ Go to Channel",
+        "sub_required": (
+            "📢 <b>Please subscribe to our channel to use the bot:</b>\n\n"
+            "Subscription is free and unlocks full access to song downloads, studio WAV, video, and music mixes.\n\n"
+            "Join the channel below and click <b>«✅ I have subscribed»</b>:"
+        ),
+        "btn_sub_channel": "📢 Subscribe to Channel",
+        "btn_check_sub":   "✅ I have subscribed",
+        "sub_success":     "✅ Thank you for subscribing! All bot features are now available.",
+        "sub_failed":      "❌ You haven't subscribed to the channel yet! Please join the channel and try again.",
         "btn_create_mix": "🎛 Create Mix",
         "mix_menu_title": (
             "🎛 <b>Suno Mix Maker</b>\n\n"
@@ -566,6 +587,15 @@ TEXTS = {
         "btn_about":     "ℹ️ Бот туралы",
         "btn_channel":   "📢 Біздің арна",
         "btn_go_channel":"➡️ Арнаға өту",
+        "sub_required": (
+            "📢 <b>Ботты пайдалану үшін біздің арнаға жазылыңыз:</b>\n\n"
+            "Жазылу тегін және әндерді, студиялық WAV, видео және микстерді шектеусіз жүктеуге мүмкіндік береді.\n\n"
+            "Төмендегі арнаға жазылып, <b>«✅ Мен жазылдым»</b> түймесін басыңыз:"
+        ),
+        "btn_sub_channel": "📢 Арнаға жазылу",
+        "btn_check_sub":   "✅ Мен жазылдым",
+        "sub_success":     "✅ Жазылғаныңызға рахмет! Енді боттың барлық мүмкіндіктері ашық.",
+        "sub_failed":      "❌ Сіз әлі арнаға жазылмадыңыз! Арнаға өтіп, «Жазылу» түймесін басып, қайта көріңіз.",
         "btn_create_mix": "🎛 Микс жасау",
         "mix_menu_title": (
             "🎛 <b>Suno Микс жасау шебері</b>\n\n"
@@ -884,6 +914,49 @@ def get_support_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text=btn_text, url=SUPPORT_URL)
     ]])
+
+
+def get_sub_keyboard(lang: str) -> InlineKeyboardMarkup:
+    t = TEXTS[lang]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["btn_sub_channel"], url=CHANNEL_URL)],
+        [InlineKeyboardButton(text=t["btn_check_sub"], callback_data="check_sub_again")]
+    ])
+
+
+# ─── Проверка обязательной подписки на канал ──────────────────────────────────
+_sub_cache: dict[int, tuple[bool, float]] = {}
+SUB_CACHE_TTL = 300  # 5 минут
+
+
+async def check_user_subscription(user_id: int) -> bool:
+    """Проверяет обязательную подписку пользователя на канал.
+    Администратор бота всегда имеет доступ.
+    Результат кэшируется на 5 минут для высокой скорости отклика."""
+    if not REQUIRED_CHANNEL:
+        return True
+    if ADMIN_ID and user_id == ADMIN_ID:
+        return True
+
+    now = time.time()
+    if user_id in _sub_cache:
+        cached_sub, ts = _sub_cache[user_id]
+        if now - ts < SUB_CACHE_TTL:
+            return cached_sub
+
+    try:
+        chat_id = int(REQUIRED_CHANNEL) if (REQUIRED_CHANNEL.startswith("-") or (REQUIRED_CHANNEL.isdigit() and len(REQUIRED_CHANNEL) > 5)) else REQUIRED_CHANNEL
+        member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        is_sub = member.status in ("creator", "administrator", "member", "restricted")
+        _sub_cache[user_id] = (is_sub, now)
+        return is_sub
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "member list is inaccessible" in err_msg or "chat not found" in err_msg or "bot is not a member" in err_msg:
+            logger.warning("Бот не добавлен администратором в канал %s! Проверка подписки временно пропущена: %s", REQUIRED_CHANNEL, e)
+            return True
+        logger.warning("Ошибка проверки подписки для %s: %s", user_id, e)
+        return True
 
 
 # ─── Загрузка аудио ────────────────────────────────────────────────────────────
@@ -1423,6 +1496,10 @@ async def cmd_start(message: types.Message, command: CommandObject):
     if is_new:
         asyncio.create_task(check_and_trigger_100_promo())
 
+    if not await check_user_subscription(user_id):
+        await message.answer(TEXTS[lang]["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
+        return
+
     await message.answer(TEXTS[lang]["start"], reply_markup=get_main_menu_keyboard(lang), parse_mode="HTML")
 
 
@@ -1892,6 +1969,26 @@ async def handle_language_selection(callback: CallbackQuery):
     )
 
 
+@dp.callback_query(F.data == "check_sub_again")
+async def handle_check_sub_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS[lang]
+    _sub_cache.pop(user_id, None)
+    is_sub = await check_user_subscription(user_id)
+    if is_sub:
+        await callback.answer(t["sub_success"], show_alert=True)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
+            t["start"], reply_markup=get_main_menu_keyboard(lang), parse_mode="HTML"
+        )
+    else:
+        await callback.answer(t["sub_failed"], show_alert=True)
+
+
 # ─── Текст песни (Lyrics Callback) ─────────────────────────────────────────────
 
 @dp.callback_query(F.data.startswith("lyrics:"))
@@ -2236,6 +2333,10 @@ async def concatenate_tracks(
 async def cmd_mix(message: types.Message):
     user_id = message.from_user.id
     lang = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
+    if not await check_user_subscription(user_id):
+        t = TEXTS[lang]
+        await message.answer(t["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
+        return
     if user_id not in _user_mix_queues:
         _user_mix_queues[user_id] = []
     text, reply_markup = await render_mix_view(user_id, lang)
@@ -2714,6 +2815,11 @@ async def handle_wav_callback(callback: CallbackQuery):
     lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
     t = TEXTS[lang]
 
+    if not await check_user_subscription(user_id):
+        await callback.answer()
+        await callback.message.reply(t["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
+        return
+
     # ── Проверка дневного лимита WAV ──────────────────────────────────────────
     is_pro = await database.is_user_pro(user_id, admin_id=ADMIN_ID)
     allowed, _ = await database.check_daily_limit(user_id, "wav", FREE_DAILY_WAV, is_pro)
@@ -3028,8 +3134,14 @@ async def generate_or_fetch_video(
 @dp.callback_query(F.data.startswith("video:"))
 async def handle_video_callback(callback: CallbackQuery):
     song_id = callback.data.split(":", 1)[1]
-    lang = await database.get_user_language(callback.from_user.id, get_lang_fallback(callback.from_user))
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
     t = TEXTS[lang]
+
+    if not await check_user_subscription(user_id):
+        await callback.answer()
+        await callback.message.reply(t["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
+        return
 
     # 1. Проверяем кэш видео
     cached_video_fid = await database.get_cached_video(song_id)
@@ -3145,6 +3257,11 @@ async def handle_suno_link(message: types.Message):
     # Блокировка
     if await database.is_user_banned(user_id):
         await message.answer(t["banned"], parse_mode="HTML")
+        return
+
+    # Обязательная подписка на канал
+    if not await check_user_subscription(user_id):
+        await message.answer(t["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
         return
 
     # Если пользователь сейчас в режиме создания микса, добавляем треки в очередь микса
