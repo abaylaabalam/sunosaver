@@ -98,12 +98,17 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN downloads_count INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN is_subscribed INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN subscribed_at TIMESTAMP DEFAULT NULL",
-            "ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT NULL",
         ]:
             try:
                 await db.execute(sql)
             except Exception:
                 pass
+
+        try:
+            await db.execute("UPDATE users SET last_active = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE last_active IS NULL")
+        except Exception:
+            pass
 
         # Миграция: заполняем source для пользователей по рефералке
         try:
