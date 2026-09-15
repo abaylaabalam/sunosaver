@@ -33,7 +33,7 @@ import base64
 import hashlib
 
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, COMM, TLEN
+from mutagen.id3 import ID3, TIT2, TPE1, COMM, TLEN, APIC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
@@ -170,6 +170,7 @@ UUID_PATTERN    = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
 SHORT_ID_PATTERN = re.compile(r"suno\.com/s/([A-Za-z0-9_-]+)")
+PLAYLIST_PATTERN = re.compile(r"suno\.com/playlist/([0-9a-fA-F-]+)")
 URL_FINDER       = re.compile(r"https?://[^\s<>\"'()]+")
 SUNO_DOMAINS     = {"suno.com", "share.suno.ai"}
 
@@ -354,6 +355,27 @@ TEXTS = {
             "Вы успешно пригласили <b>{total} друзей</b>!\n"
             "Все дневные лимиты сняты, активирован безлимитный WAV и миксы до 10 песен. Спасибо, что вы с нами! 🚀"
         ),
+        "artist_auto": "Авто (автор из Suno)",
+        "artist_info": (
+            "👤 <b>Настройка авторства треков</b>\n\n"
+            "Текущий автор: <b>{current}</b>\n\n"
+            "Чтобы установить своё имя или ник во всех скачиваемых песнях, отправьте:\n"
+            "<code>/artist МойНик</code>\n\n"
+            "Чтобы вернуть автоопределение автора из Suno, отправьте:\n"
+            "<code>/artist reset</code>"
+        ),
+        "artist_set_done": "✅ Теперь в поле «Исполнитель» во всех ваших треках будет указываться: <b>{artist}</b>\n<i>(Чтобы сбросить, отправьте /artist reset)</i>",
+        "artist_reset_done": "✅ Настройки сброшены! Теперь автор будет определяться автоматически из Suno.",
+        "artist_invalid": "❌ Недопустимое имя автора. Пожалуйста, укажите корректный текст (до 40 символов).",
+        "pl_title": "Плейлист",
+        "pl_total_tracks": "Всего треков",
+        "pl_tracks_word": "треков",
+        "pl_prompt_action": "Выберите действие:",
+        "btn_pl_download": "📥 Скачать все треки ({count})",
+        "btn_pl_mix": "🎛 Собрать плейлист в микс",
+        "pl_not_found": "❌ Не удалось загрузить плейлист. Убедитесь, что ссылка верна и плейлист публичный.",
+        "pl_downloading": "📥 Начинаю скачивание плейлиста ({count} треков)...",
+        "pl_mix_added": "✅ <b>{count}</b> треков из плейлиста добавлены в конструктор микса!",
     },
     "en": {
         "start": (
@@ -519,6 +541,27 @@ TEXTS = {
             "You have invited <b>{total} friends</b>!\n"
             "All daily limits are removed, unlimited studio WAV and 10-track mixes are now yours forever. Thank you! 🚀"
         ),
+        "artist_auto": "Auto (Suno creator)",
+        "artist_info": (
+            "👤 <b>Custom Artist Settings</b>\n\n"
+            "Current artist: <b>{current}</b>\n\n"
+            "To set your own name/nickname for all downloaded tracks, send:\n"
+            "<code>/artist YourNick</code>\n\n"
+            "To reset back to auto-detecting creator from Suno, send:\n"
+            "<code>/artist reset</code>"
+        ),
+        "artist_set_done": "✅ Artist name for all your downloaded tracks is now set to: <b>{artist}</b>\n<i>(To reset, send /artist reset)</i>",
+        "artist_reset_done": "✅ Settings reset! Artist will now be automatically detected from Suno.",
+        "artist_invalid": "❌ Invalid artist name. Please provide valid text (up to 40 characters).",
+        "pl_title": "Playlist",
+        "pl_total_tracks": "Total tracks",
+        "pl_tracks_word": "tracks",
+        "pl_prompt_action": "Choose an action:",
+        "btn_pl_download": "📥 Download all tracks ({count})",
+        "btn_pl_mix": "🎛 Build mix from playlist",
+        "pl_not_found": "❌ Could not load playlist. Make sure the link is valid and public.",
+        "pl_downloading": "📥 Starting playlist download ({count} tracks)...",
+        "pl_mix_added": "✅ <b>{count}</b> tracks from the playlist added to mix builder!",
     },
     "kk": {
         "start": (
@@ -684,6 +727,27 @@ TEXTS = {
             "Сіз <b>{total} дос</b> шақырдыңыз!\n"
             "Барлық күндік шектеулер алынып тасталды, шектеусіз WAV және 10 әнге дейінгі микстер ашылды. Бізбен бірге болғаныңызға рақмет! 🚀"
         ),
+        "artist_auto": "Авто (Suno авторы)",
+        "artist_info": (
+            "👤 <b>Трек авторын баптау</b>\n\n"
+            "Қазіргі автор: <b>{current}</b>\n\n"
+            "Барлық жүктелетін әндерге өз атыңызды немесе бүркеншік атыңызды орнату үшін жіберіңіз:\n"
+            "<code>/artist МеніңНикім</code>\n\n"
+            "Suno-дан автоанықтауға қайтару үшін жіберіңіз:\n"
+            "<code>/artist reset</code>"
+        ),
+        "artist_set_done": "✅ Енді жүктелген барлық тректеріңіздің орындаушысы ретінде <b>{artist}</b> көрсетіледі\n<i>(Қайтару үшін /artist reset жіберіңіз)</i>",
+        "artist_reset_done": "✅ Баптаулар қалпына келтірілді! Енді автор Suno-дан автоматты түрде анықталады.",
+        "artist_invalid": "❌ Жарамсыз автор аты. Дұрыс мәтін көрсетіңіз (40 таңбаға дейін).",
+        "pl_title": "Плейлист",
+        "pl_total_tracks": "Барлық трек",
+        "pl_tracks_word": "трек",
+        "pl_prompt_action": "Әрекетті таңдаңыз:",
+        "btn_pl_download": "📥 Барлық тректі жүктеу ({count})",
+        "btn_pl_mix": "🎛 Плейлисттен микс жасау",
+        "pl_not_found": "❌ Плейлистті жүктеу мүмкін болмады. Сілтеме дұрыс және плейлист ашық екеніне көз жеткізіңіз.",
+        "pl_downloading": "📥 Плейлистті жүктеу басталды ({count} трек)...",
+        "pl_mix_added": "✅ Плейлисттен <b>{count}</b> трек микс шеберіне қосылды!",
     },
 }
 
@@ -706,8 +770,16 @@ def find_all_suno_urls(text: str) -> list[str]:
     return result
 
 
+def extract_playlist_id(url: str) -> str | None:
+    """UUID плейлиста из ссылки вида suno.com/playlist/..."""
+    m = PLAYLIST_PATTERN.search(url)
+    return m.group(1) if m else None
+
+
 def extract_song_id(url: str) -> str | None:
     """UUID (song/...) или короткий ID (s/...) из ссылки Suno."""
+    if "/playlist/" in url:
+        return None
     m = UUID_PATTERN.search(url)
     if m:
         return m.group(0)
@@ -839,8 +911,14 @@ async def _convert_audio_to_mp3(input_data: bytes | str, is_url: bool = False) -
                 pass
 
 
-def add_id3_tags(audio_bytes: bytes, title: str, artist: str) -> tuple[bytes, int]:
-    """Записывает ID3-теги в MP3 и возвращает (tagged_bytes, duration_seconds).
+def add_id3_tags(
+    audio_bytes: bytes,
+    title: str,
+    artist: str,
+    image_bytes: bytes | None = None,
+) -> tuple[bytes, int]:
+    """Записывает ID3-теги в MP3 (название, артист, комментарий, обложка)
+    и возвращает (tagged_bytes, duration_seconds).
     При ошибке возвращает исходные байты и 0."""
     buf = io.BytesIO(audio_bytes)
     duration_sec = 0
@@ -855,6 +933,17 @@ def add_id3_tags(audio_bytes: bytes, title: str, artist: str) -> tuple[bytes, in
         audio.tags.add(COMM(encoding=3, lang="eng", desc="", text="Downloaded with @sunosaver_bot"))
         if duration_sec > 0:
             audio.tags.add(TLEN(encoding=3, text=str(duration_sec * 1000)))
+        if image_bytes:
+            mime = "image/png" if image_bytes.startswith(b"\x89PNG") else "image/jpeg"
+            audio.tags.add(
+                APIC(
+                    encoding=3,
+                    mime=mime,
+                    type=3,  # Cover front
+                    desc="Cover",
+                    data=image_bytes,
+                )
+            )
         buf.seek(0)
         audio.save(buf)
         buf.seek(0)
@@ -1196,8 +1285,27 @@ async def download_direct_from_suno(
             except Exception:
                 lyrics = prompt_m.group(1).encode().decode('unicode-escape', errors='ignore').strip()
 
-        # Если в HTML текст не найден, пробуем studio-api clip
-        if not lyrics and uuid:
+        author = None
+        image_url = None
+
+        og_img = re.search(r'<meta property="og:image" content="([^"]+)"', html_text)
+        if og_img:
+            image_url = og_img.group(1).strip()
+
+        author_m = re.search(r'"display_name":"([^"]+)"', html_text)
+        if author_m:
+            author = author_m.group(1).strip()
+        else:
+            handle_m = re.search(r'"handle":"([^"]+)"', html_text)
+            if handle_m:
+                author = handle_m.group(1).strip()
+            else:
+                desc_m = re.search(r'<meta property="og:description" content="[^"]*by @?([^"\.]+)', html_text)
+                if desc_m:
+                    author = desc_m.group(1).strip()
+
+        # Если в HTML текст, автор или обложка не найдены, запрашиваем studio-api clip
+        if uuid and (not lyrics or not author or not image_url):
             try:
                 async with session.get(
                     f"https://studio-api.prod.suno.com/api/clip/{uuid}",
@@ -1206,11 +1314,36 @@ async def download_direct_from_suno(
                 ) as clip_resp:
                     if clip_resp.status == 200:
                         clip_data = await clip_resp.json()
-                        lyrics = clip_data.get("metadata", {}).get("prompt")
-                        if lyrics:
-                            lyrics = lyrics.strip()
+                        if not lyrics:
+                            lyrics = clip_data.get("metadata", {}).get("prompt")
+                            if lyrics:
+                                lyrics = lyrics.strip()
+                        if not author:
+                            author = clip_data.get("display_name") or clip_data.get("handle")
+                        if not image_url:
+                            image_url = clip_data.get("image_large_url") or clip_data.get("image_url")
             except Exception:
                 pass
+
+        if not image_url and uuid:
+            image_url = f"https://cdn1.suno.ai/image_large_{uuid}.png"
+
+        # Скачиваем байты обложки
+        image_bytes = None
+        if image_url:
+            try:
+                async with session.get(
+                    image_url,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                    ssl=ssl_ctx,
+                ) as img_resp:
+                    if img_resp.status == 200:
+                        i_data = await img_resp.read()
+                        if len(i_data) > 100:
+                            image_bytes = i_data
+            except Exception as img_err:
+                logger.warning("Не удалось скачать обложку: %s", img_err)
 
         # 1. Проверяем наличие видео MP4 на Suno CDN
         video_m = re.search(r'"video_url":"(https://[^"]+\.mp4)"', html_text)
@@ -1220,7 +1353,7 @@ async def download_direct_from_suno(
             mp3_bytes = await _convert_audio_to_mp3(mp4_url, is_url=True)
             if mp3_bytes and is_valid_mp3(mp3_bytes):
                 logger.info("Прямая конвертация через ffmpeg успешна: %s байт", len(mp3_bytes))
-                return mp3_bytes, title, lyrics, uuid
+                return mp3_bytes, title, lyrics, uuid, author, image_bytes, image_url
 
         # 2. Прямая загрузка защищённого аудиопотока m4a через официальные гостевые права
         logger.info("Загрузка через аудиопоток m4a для трека %s...", uuid)
@@ -1301,7 +1434,7 @@ async def download_direct_from_suno(
                                     mp3_out = await _convert_audio_to_mp3(dec_bytes, is_url=False)
                                     if mp3_out and is_valid_mp3(mp3_out):
                                         logger.info("Успешно расшифровано и конвертировано в MP3 (попытка %s/5): %s байт", stream_attempt, len(mp3_out))
-                                        return mp3_out, title, lyrics, uuid
+                                        return mp3_out, title, lyrics, uuid, author, image_bytes, image_url
                                     else:
                                         logger.warning("Ошибка ffmpeg при конвертации декодированного m4a (попытка %s/5)", stream_attempt)
                             elif stream_resp.status == 404:
@@ -1325,7 +1458,58 @@ async def download_direct_from_suno(
     except Exception as e:
         logger.warning("Прямое скачивание Suno не удалось: %s", e, exc_info=True)
 
-    return None, "Suno Track", None, uuid
+    return None, "Suno Track", None, uuid, author, image_bytes, image_url
+
+
+async def fetch_suno_playlist(playlist_id: str, session: aiohttp.ClientSession, limit: int = 15) -> dict | None:
+    """Запрашивает метаданные и список треков плейлиста Suno по UUID."""
+    url = f"https://studio-api.prod.suno.com/api/playlist/{playlist_id}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin": "https://suno.com",
+        "Referer": "https://suno.com/",
+    }
+    try:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10), ssl=ssl_ctx) as resp:
+            if resp.status != 200:
+                logger.warning("studio-api playlist вернул статус %s для %s", resp.status, playlist_id)
+                return None
+            data = await resp.json()
+            title = data.get("name") or "Suno Playlist"
+            creator = data.get("user_display_name") or data.get("user_handle") or "Suno Creator"
+            total = data.get("num_total_results") or len(data.get("playlist_clips", []))
+            image_url = data.get("image_url")
+            clips_raw = data.get("playlist_clips", [])
+            tracks = []
+            for item in clips_raw[:limit]:
+                clip = item.get("clip", {})
+                c_id = clip.get("id")
+                if c_id:
+                    tracks.append({
+                        "song_id": c_id,
+                        "title": clip.get("title") or "Suno Track",
+                        "author": clip.get("display_name") or clip.get("handle") or creator,
+                        "url": f"https://suno.com/song/{c_id}",
+                    })
+            return {
+                "id": playlist_id,
+                "title": title,
+                "creator": creator,
+                "total": total,
+                "image_url": image_url,
+                "tracks": tracks,
+            }
+    except Exception as e:
+        logger.error("Ошибка получения плейлиста %s: %s", playlist_id, e)
+        return None
+
+
+def get_playlist_inline_keyboard(lang: str, playlist_id: str, tracks_count: int) -> InlineKeyboardMarkup:
+    t = TEXTS[lang]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["btn_pl_download"].format(count=tracks_count), callback_data=f"pl_dl:{playlist_id}")],
+        [InlineKeyboardButton(text=t["btn_pl_mix"], callback_data=f"pl_mix:{playlist_id}")],
+    ])
 
 
 # ─── Обработка одного трека ────────────────────────────────────────────────────
@@ -1353,15 +1537,19 @@ async def _download_and_send(
         return False
 
     song_id = extract_song_id(suno_url)
+    custom_artist = await database.get_user_custom_artist(user_id)
 
     # ── Кэш ──────────────────────────────────────────────────────────────────
     if song_id:
         cache_data = await database.get_cached_track(song_id)
         if cache_data:
-            cached_fid, cached_title, cached_lyrics = cache_data
+            cached_fid = cache_data[0]
+            cached_title = cache_data[1]
+            cached_lyrics = cache_data[2]
+            cached_artist = cache_data[3] if len(cache_data) > 3 else None
             safe_title = cached_title or "Suno Track"
             escaped_title = html.escape(safe_title)
-            artist = "Suno AI (@sunosaver_bot)"
+            artist = custom_artist or cached_artist or "Suno AI (@sunosaver_bot)"
             caption = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
             logger.info("Из кэша: %s", song_id)
             try:
@@ -1392,10 +1580,14 @@ async def _download_and_send(
         title = "Suno Track"
         lyrics = None
         resolved_uuid = None
+        author = None
+        image_bytes = None
+        image_url = None
         is_not_found = False
         try:
             async with SEMAPHORE:
-                raw_audio, title, lyrics, resolved_uuid = await download_direct_from_suno(suno_url, HTTP_SESSION)
+                res = await download_direct_from_suno(suno_url, HTTP_SESSION)
+                raw_audio, title, lyrics, resolved_uuid, author, image_bytes, image_url = res
         except TrackNotFoundError:
             is_not_found = True
 
@@ -1405,7 +1597,8 @@ async def _download_and_send(
             await asyncio.sleep(1.5)
             try:
                 async with SEMAPHORE:
-                    raw_audio, title, lyrics, resolved_uuid = await download_direct_from_suno(suno_url, HTTP_SESSION)
+                    res = await download_direct_from_suno(suno_url, HTTP_SESSION)
+                    raw_audio, title, lyrics, resolved_uuid, author, image_bytes, image_url = res
             except TrackNotFoundError:
                 is_not_found = True
 
@@ -1452,16 +1645,20 @@ async def _download_and_send(
         # ── Формирование файла ────────────────────────────────────────────────
         safe_title     = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
         escaped_title  = html.escape(safe_title)
-        artist         = "Suno AI (@sunosaver_bot)"
-        tagged_audio, duration_sec = add_id3_tags(raw_audio, safe_title, artist)
+        artist         = custom_artist or author or "Suno AI (@sunosaver_bot)"
+        tagged_audio, duration_sec = add_id3_tags(raw_audio, safe_title, artist, image_bytes=image_bytes)
         audio_file     = BufferedInputFile(tagged_audio, filename=f"{safe_title}.mp3")
+        thumb_file     = BufferedInputFile(image_bytes, filename="cover.jpg") if image_bytes else None
         caption        = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
         reply_markup   = get_track_inline_keyboard(lang, song_id)
 
         # ── Отправка ──────────────────────────────────────────────────────────
         sent_msg = await message.answer_audio(
-            audio=audio_file, caption=caption,
-            title=safe_title, performer=artist,
+            audio=audio_file,
+            thumbnail=thumb_file,
+            caption=caption,
+            title=safe_title,
+            performer=artist,
             duration=duration_sec if duration_sec > 0 else None,
             reply_markup=reply_markup,
             parse_mode="HTML",
@@ -1469,9 +1666,9 @@ async def _download_and_send(
 
         if sent_msg.audio:
             if song_id:
-                await database.save_track_cache(song_id, sent_msg.audio.file_id, safe_title, lyrics)
+                await database.save_track_cache(song_id, sent_msg.audio.file_id, safe_title, lyrics, artist=author, image_url=image_url)
             if original_song_id and original_song_id != song_id:
-                await database.save_track_cache(original_song_id, sent_msg.audio.file_id, safe_title, lyrics)
+                await database.save_track_cache(original_song_id, sent_msg.audio.file_id, safe_title, lyrics, artist=author, image_url=image_url)
             await database.save_user_track(message.from_user.id, song_id or original_song_id, safe_title)
             await database.increment_daily_usage(message.from_user.id, "downloads")
 
@@ -2072,6 +2269,32 @@ async def btn_channel(message: types.Message):
     await message.answer(t["channel_msg"], reply_markup=kb, parse_mode="HTML")
 
 
+# ─── Настройка авторства (/artist) ─────────────────────────────────────────────
+
+@dp.message(Command("artist"))
+@dp.message(Command("author"))
+async def cmd_artist(message: types.Message, command: CommandObject):
+    user_id = message.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+    if not command.args or not command.args.strip():
+        current_artist = await database.get_user_custom_artist(user_id)
+        current_str = html.escape(current_artist) if current_artist else t["artist_auto"]
+        await message.answer(t["artist_info"].format(current=current_str), parse_mode="HTML")
+        return
+    arg = command.args.strip()
+    if arg.lower() in ("reset", "clear", "сброс", "auto"):
+        await database.set_user_custom_artist(user_id, None)
+        await message.answer(t["artist_reset_done"], parse_mode="HTML")
+    else:
+        clean_name = re.sub(r'[\\/*?:"<>|\n\r\t]', '', arg).strip()[:40]
+        if not clean_name:
+            await message.answer(t["artist_invalid"], parse_mode="HTML")
+            return
+        await database.set_user_custom_artist(user_id, clean_name)
+        await message.answer(t["artist_set_done"].format(artist=html.escape(clean_name)), parse_mode="HTML")
+
+
 # ─── Смена языка ───────────────────────────────────────────────────────────────
 
 @dp.callback_query(F.data.startswith("set_lang:"))
@@ -2309,7 +2532,7 @@ async def get_track_audio_bytes(song_id: str) -> tuple[bytes | None, str]:
     try:
         # Если в Telegram нет, пробуем прямое скачивание с Suno
         try:
-            raw_audio, extracted_title, _, _ = await download_direct_from_suno(target_url, session)
+            raw_audio, extracted_title, *rest = await download_direct_from_suno(target_url, session)
             if raw_audio and is_valid_mp3(raw_audio):
                 return raw_audio, extracted_title or title
         except TrackNotFoundError:
@@ -2742,6 +2965,67 @@ async def handle_mix_quick(callback: CallbackQuery):
     await callback.message.reply(t["mix_mode_prompt"], reply_markup=kb, parse_mode="HTML")
 
 
+# ─── Скачивание плейлиста и добавление в микс ──────────────────────────────────
+
+@dp.callback_query(F.data.startswith("pl_dl:"))
+async def handle_playlist_download(callback: CallbackQuery):
+    playlist_id = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS[lang]
+
+    if not await check_user_subscription(user_id):
+        await callback.answer(t["sub_failed"], show_alert=True)
+        return
+
+    pl_data = await fetch_suno_playlist(playlist_id, HTTP_SESSION, limit=15)
+    if not pl_data or not pl_data["tracks"]:
+        await callback.answer(t["pl_not_found"], show_alert=True)
+        return
+
+    await callback.answer()
+    tracks = pl_data["tracks"]
+    await callback.message.answer(t["pl_downloading"].format(count=len(tracks)), parse_mode="HTML")
+
+    for idx, tr in enumerate(tracks, 1):
+        await _download_and_send(callback.message, tr["url"], lang, t, track_num=idx, total=len(tracks))
+
+
+@dp.callback_query(F.data.startswith("pl_mix:"))
+async def handle_playlist_mix(callback: CallbackQuery):
+    playlist_id = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS[lang]
+
+    if not await check_user_subscription(user_id):
+        await callback.answer(t["sub_failed"], show_alert=True)
+        return
+
+    is_pro = await database.is_user_pro(user_id, admin_id=ADMIN_ID)
+    max_tracks = MAX_MIX_TRACKS if is_pro else FREE_MAX_MIX_TRACKS
+
+    pl_data = await fetch_suno_playlist(playlist_id, HTTP_SESSION, limit=max_tracks)
+    if not pl_data or not pl_data["tracks"]:
+        await callback.answer(t["pl_not_found"], show_alert=True)
+        return
+
+    await callback.answer()
+    tracks = pl_data["tracks"]
+    _user_mix_queues[user_id] = [{"song_id": tr["song_id"], "title": tr["title"]} for tr in tracks[:max_tracks]]
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["mix_mode_normal"], callback_data="mix_mode:normal")],
+        [InlineKeyboardButton(text=t["mix_mode_crossfade"], callback_data="mix_mode:crossfade")],
+        [InlineKeyboardButton(text=t["mix_btn_cancel"], callback_data="mix_cancel")],
+    ])
+    await callback.message.reply(
+        f"{t['pl_mix_added'].format(count=len(_user_mix_queues[user_id]))}\n\n{t['mix_mode_prompt']}",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
 # ─── Скачивание WAV (WAV Callback) ─────────────────────────────────────────────
 
 async def _pcm_to_wav(input_bytes: bytes) -> bytes | None:
@@ -3162,7 +3446,7 @@ async def generate_or_fetch_video(
 
         if not audio_bytes and uuid:
             try:
-                raw_audio, extracted_title, _, _ = await download_direct_from_suno(make_suno_url(uuid), session)
+                raw_audio, extracted_title, *rest = await download_direct_from_suno(make_suno_url(uuid), session)
                 if raw_audio:
                     audio_bytes = raw_audio
                     if extracted_title and extracted_title != "Suno Track":
@@ -3390,6 +3674,30 @@ async def handle_suno_link(message: types.Message):
         await message.answer(t["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
         return
 
+    # Проверка ссылки на плейлист Suno
+    playlist_id = extract_playlist_id(message.text)
+    if playlist_id:
+        status_msg = await message.answer(t["fetching"], parse_mode="HTML")
+        pl_data = await fetch_suno_playlist(playlist_id, HTTP_SESSION)
+        if not pl_data or not pl_data["tracks"]:
+            await status_msg.edit_text(t["pl_not_found"], parse_mode="HTML")
+            return
+
+        text = (
+            f"📂 <b>{t['pl_title']}:</b> <b>{html.escape(pl_data['title'])}</b>\n"
+            f"👤 <b>{t['artist_label']}:</b> {html.escape(pl_data['creator'])}\n"
+            f"🎵 <b>{t['pl_total_tracks']}:</b> {pl_data['total']} {t['pl_tracks_word']}\n\n"
+            f"{t['pl_prompt_action']}"
+        )
+        kb = get_playlist_inline_keyboard(lang, playlist_id, len(pl_data["tracks"]))
+        await status_msg.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        return
+
+    # Исключаем ссылки на плейлисты из списка обычных треков
+    suno_urls = [u for u in suno_urls if not extract_playlist_id(u)]
+    if not suno_urls:
+        return
+
     # Если пользователь сейчас в режиме создания микса, добавляем треки в очередь микса
     if user_id in _user_mix_queues:
         queue = _user_mix_queues[user_id]
@@ -3443,6 +3751,7 @@ async def handle_suno_link(message: types.Message):
 async def setup_bot_commands():
     await bot.set_my_commands([
         BotCommand(command="start",    description="Restart bot"),
+        BotCommand(command="artist",   description="👤 Set custom artist name"),
         BotCommand(command="pro",      description="⭐️ PRO status & referrals"),
         BotCommand(command="mix",      description="Create a music mix"),
         BotCommand(command="help",     description="How to download"),
@@ -3451,6 +3760,7 @@ async def setup_bot_commands():
     ], scope=BotCommandScopeDefault())
     await bot.set_my_commands([
         BotCommand(command="start",    description="Перезапустить бота"),
+        BotCommand(command="artist",   description="👤 Настроить имя автора"),
         BotCommand(command="pro",      description="⭐️ PRO-статус и рефералка"),
         BotCommand(command="mix",      description="Собрать микс из песен"),
         BotCommand(command="help",     description="Инструкция"),
@@ -3459,6 +3769,7 @@ async def setup_bot_commands():
     ], scope=BotCommandScopeDefault(), language_code="ru")
     await bot.set_my_commands([
         BotCommand(command="start",    description="Ботты қайта іске қосу"),
+        BotCommand(command="artist",   description="👤 Автор есімін баптау"),
         BotCommand(command="pro",      description="⭐️ PRO-статус және достар"),
         BotCommand(command="mix",      description="Әндерден микс жасау"),
         BotCommand(command="help",     description="Нұсқаулық"),

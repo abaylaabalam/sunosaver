@@ -99,6 +99,9 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN is_subscribed INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN subscribed_at TIMESTAMP DEFAULT NULL",
             "ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN custom_artist TEXT DEFAULT NULL",
+            "ALTER TABLE track_cache ADD COLUMN artist TEXT DEFAULT NULL",
+            "ALTER TABLE track_cache ADD COLUMN image_url TEXT DEFAULT NULL",
         ]:
             try:
                 await db.execute(sql)
@@ -355,10 +358,10 @@ async def get_all_users() -> list[int]:
 
 # ─── Кэш треков ───────────────────────────────────────────────────────────────
 
-async def get_cached_track(song_id: str) -> tuple[str, str | None, str | None] | None:
+async def get_cached_track(song_id: str) -> tuple[str, str | None, str | None, str | None, str | None] | None:
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
-            "SELECT file_id, title, lyrics FROM track_cache WHERE song_id = ? AND file_id IS NOT NULL AND file_id != ''", (song_id,)
+            "SELECT file_id, title, lyrics, artist, image_url FROM track_cache WHERE song_id = ? AND file_id IS NOT NULL AND file_id != ''", (song_id,)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
@@ -370,8 +373,27 @@ async def get_cached_track(song_id: str) -> tuple[str, str | None, str | None] |
                     (song_id,),
                 )
                 await db.commit()
-                return row[0], row[1], row[2]
+                return row[0], row[1], row[2], row[3], row[4]
             return None
+
+
+async def get_user_custom_artist(user_id: int) -> str | None:
+    """Возвращает кастомный никнейм исполнителя, заданный пользователем, или None."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT custom_artist FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row and row[0] else None
+
+
+async def set_user_custom_artist(user_id: int, artist: str | None):
+    """Сохраняет или сбрасывает кастомный никнейм исполнителя для пользователя."""
+    val = artist.strip()[:64] if artist and artist.strip() else None
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE users SET custom_artist = ? WHERE user_id = ?",
+            (val, user_id),
+        )
+        await db.commit()
 
 
 async def get_track_lyrics(song_id: str) -> str | None:
@@ -435,20 +457,29 @@ async def save_video_cache(song_id: str, video_file_id: str):
         await db.commit()
 
 
-async def save_track_cache(song_id: str, file_id: str, title: str, lyrics: str | None = None):
+async def save_track_cache(
+    song_id: str,
+    file_id: str,
+    title: str,
+    lyrics: str | None = None,
+    artist: str | None = None,
+    image_url: str | None = None,
+):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute(
             """
             INSERT INTO track_cache
-                (song_id, file_id, title, lyrics, download_count, last_used)
-            VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                (song_id, file_id, title, lyrics, artist, image_url, download_count, last_used)
+            VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
             ON CONFLICT(song_id) DO UPDATE SET
                 file_id = excluded.file_id,
                 title = excluded.title,
                 lyrics = COALESCE(excluded.lyrics, track_cache.lyrics),
+                artist = COALESCE(excluded.artist, track_cache.artist),
+                image_url = COALESCE(excluded.image_url, track_cache.image_url),
                 last_used = CURRENT_TIMESTAMP
             """,
-            (song_id, file_id, title, lyrics),
+            (song_id, file_id, title, lyrics, artist, image_url),
         )
         await db.execute(
             "UPDATE stats SET total_downloads = total_downloads + 1 WHERE id = 1"
