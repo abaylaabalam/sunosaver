@@ -84,6 +84,18 @@ async def init_db():
             )
         """)
 
+        # Таблица донатов и поддержки
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS donations (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL,
+                username   TEXT,
+                amount     INTEGER NOT NULL,
+                currency   TEXT DEFAULT 'XTR',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # Миграция: добавляем новые колонки в users и track_cache для существующих БД
         for sql in [
             "ALTER TABLE track_cache ADD COLUMN download_count INTEGER DEFAULT 1",
@@ -323,10 +335,11 @@ async def check_daily_limit(
             return current < limit, current
 
 
-async def increment_daily_usage(user_id: int, action: str):
-    """Увеличивает дневной счетчик action ('downloads', 'mixes', 'wav')."""
+async def increment_daily_usage(user_id: int, action: str) -> int:
+    """Увеличивает дневной счетчик action ('downloads', 'mixes', 'wav'). Возвращает общий downloads_count пользователя."""
     today = datetime.utcnow().strftime("%Y-%m-%d")
     col = f"{action}_count"
+    total_downloads = 0
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute(
             f"""
@@ -341,7 +354,45 @@ async def increment_daily_usage(user_id: int, action: str):
             f"UPDATE users SET last_active = CURRENT_TIMESTAMP {extra_sql} WHERE user_id = ?",
             (user_id,),
         )
+        if action == "downloads":
+            async with db.execute("SELECT downloads_count FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row and row[0]:
+                    total_downloads = row[0]
         await db.commit()
+    return total_downloads
+
+
+async def save_donation(user_id: int, username: str | None, amount: int, currency: str = "XTR"):
+    """Сохраняет донат пользователя."""
+    clean_username = (username or f"User_{user_id}").lstrip("@")[:64]
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """
+            INSERT INTO donations (user_id, username, amount, currency)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, clean_username, amount, currency),
+        )
+        await db.commit()
+
+
+async def get_top_donators(limit: int = 5) -> list[dict]:
+    """Возвращает топ донаторов по общей сумме Stars."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            """
+            SELECT username, SUM(amount) as total_amount
+            FROM donations
+            GROUP BY user_id
+            ORDER BY total_amount DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [{"username": r[0], "amount": r[1]} for r in rows]
+
 
 
 async def get_all_users() -> list[int]:

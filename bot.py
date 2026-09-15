@@ -29,6 +29,8 @@ from aiogram.types import (
     CallbackQuery,
     BotCommand,
     BotCommandScopeDefault,
+    LabeledPrice,
+    PreCheckoutQuery,
 )
 import base64
 import hashlib
@@ -64,6 +66,14 @@ FREE_DAILY_MIXES     = int(os.getenv("FREE_DAILY_MIXES", 5))
 FREE_DAILY_WAV       = int(os.getenv("FREE_DAILY_WAV", 1))
 FREE_MAX_MIX_TRACKS  = int(os.getenv("FREE_MAX_MIX_TRACKS", 5))
 REFERRALS_FOR_PRO    = int(os.getenv("REFERRALS_FOR_PRO", 3))
+
+# Донаты и поддержка
+TRIBUTE_URL          = os.getenv("TRIBUTE_URL", "https://t.me/tribute/app?startapp=dQv3")
+KASPI_CARD           = os.getenv("KASPI_CARD", "4400430324694725")
+KASPI_NAME           = os.getenv("KASPI_NAME", "Абай А.")
+
+_waiting_donate_stars: dict[int, bool]  = {}
+_last_donate_prompt:   dict[int, float] = {}
 
 # ─── Логирование ───────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -377,6 +387,35 @@ TEXTS = {
         "pl_not_found": "❌ Не удалось загрузить плейлист. Убедитесь, что ссылка верна и плейлист публичный.",
         "pl_downloading": "📥 Начинаю скачивание плейлиста ({count} треков)...",
         "pl_mix_added": "✅ <b>{count}</b> треков из плейлиста добавлены в конструктор микса!",
+        "btn_donate": "☕️ Поддержать бота",
+        "donate_title": (
+            "☕️ <b>Поддержка проекта SunoSaver</b>\n\n"
+            "Бот работает быстро, бесплатно и без рекламы благодаря вашей поддержке! 🚀\n"
+            "Все средства идут на оплату серверов конвертации и разработку новых функций.\n\n"
+            "Выберите удобный способ поддержки:"
+        ),
+        "btn_donate_stars": "⭐️ Telegram Stars (любая сумма)",
+        "btn_donate_tribute": "💳 Tribute (Карты РФ / СНГ / TON)",
+        "btn_donate_kaspi": "🇰🇿 Kaspi QR / Перевод",
+        "btn_donate_top": "🏆 Топ спонсоров",
+        "donate_stars_prompt": "⭐️ <b>Поддержка через Telegram Stars</b>\n\nВыберите сумму звёзд для поддержки или укажите своё количество:",
+        "btn_custom_stars": "✍️ Ввести свою сумму",
+        "donate_custom_ask": "✍️ Напишите в чат количество звёзд, которое хотите отправить (число от 1 до 2500):",
+        "donate_custom_invalid": "❌ Пожалуйста, отправьте корректное число звёзд (от 1 до 2500).",
+        "donate_kaspi_info": (
+            "🇰🇿 <b>Перевод через Kaspi:</b>\n\n"
+            "💳 <b>Номер карты:</b>\n"
+            "<code>{card}</code> <i>(нажмите для копирования)</i>\n"
+            "👤 <b>Получатель:</b> {name}\n\n"
+            "❤️ Огромное спасибо за поддержку! После перевода можете написать @youtubestanmanager, чтобы мы добавили вас в 🏆 Топ спонсоров!"
+        ),
+        "donate_top_title": "🏆 <b>Зал славы спонсоров SunoSaver:</b>\n\n{list}\n\n❤️ Спасибо каждому за вклад в развитие проекта!",
+        "donate_top_empty": "🏆 <b>Зал славы спонсоров SunoSaver:</b>\n\nПока список пуст — вы можете стать самым первым спонсором! 🚀",
+        "donate_thanks": "🎉 <b>Огромное спасибо за поддержку!</b> ❤️\n\nВы отправили <b>{stars} ⭐️</b>! Вы добавлены в 🏆 Зал славы спонсоров.",
+        "donate_soft_prompt": (
+            "☕️ <b>Вам нравится SunoSaver?</b>\n\n"
+            "Вы скачали уже <b>{count} треков</b>! Если бот приносит вам пользу, вы можете поддержать проект чашечкой кофе или звёздами ⭐️"
+        ),
     },
     "en": {
         "start": (
@@ -563,6 +602,35 @@ TEXTS = {
         "pl_not_found": "❌ Could not load playlist. Make sure the link is valid and public.",
         "pl_downloading": "📥 Starting playlist download ({count} tracks)...",
         "pl_mix_added": "✅ <b>{count}</b> tracks from the playlist added to mix builder!",
+        "btn_donate": "☕️ Support Project",
+        "donate_title": (
+            "☕️ <b>Support SunoSaver</b>\n\n"
+            "The bot runs fast, free and without ads thanks to your support! 🚀\n"
+            "All donations go directly toward server hosting and developing new features.\n\n"
+            "Choose a payment method:"
+        ),
+        "btn_donate_stars": "⭐️ Telegram Stars (any amount)",
+        "btn_donate_tribute": "💳 Tribute (Cards / TON / Crypto)",
+        "btn_donate_kaspi": "🇰🇿 Kaspi Transfer",
+        "btn_donate_top": "🏆 Top Supporters",
+        "donate_stars_prompt": "⭐️ <b>Support via Telegram Stars</b>\n\nChoose an amount or enter your custom amount:",
+        "btn_custom_stars": "✍️ Custom Amount",
+        "donate_custom_ask": "✍️ Send the amount of Stars you'd like to donate (number from 1 to 2500):",
+        "donate_custom_invalid": "❌ Please enter a valid number of Stars (from 1 to 2500).",
+        "donate_kaspi_info": (
+            "🇰🇿 <b>Kaspi Bank Transfer:</b>\n\n"
+            "💳 <b>Card number:</b>\n"
+            "<code>{card}</code> <i>(tap to copy)</i>\n"
+            "👤 <b>Recipient:</b> {name}\n\n"
+            "❤️ Thank you so much for your support! After transfer, text @youtubestanmanager to get added to the 🏆 Wall of Fame!"
+        ),
+        "donate_top_title": "🏆 <b>SunoSaver Wall of Fame:</b>\n\n{list}\n\n❤️ Thank you to every supporter!",
+        "donate_top_empty": "🏆 <b>SunoSaver Wall of Fame:</b>\n\nNo supporters yet — be the very first one! 🚀",
+        "donate_thanks": "🎉 <b>Thank you so much for your support!</b> ❤️\n\nYou sent <b>{stars} ⭐️</b>! You are now featured on our 🏆 Wall of Fame.",
+        "donate_soft_prompt": (
+            "☕️ <b>Enjoying SunoSaver?</b>\n\n"
+            "You've downloaded <b>{count} tracks</b>! If you find the bot helpful, consider supporting it with a cup of coffee or Stars ⭐️"
+        ),
     },
     "kk": {
         "start": (
@@ -749,6 +817,35 @@ TEXTS = {
         "pl_not_found": "❌ Плейлистті жүктеу мүмкін болмады. Сілтеме дұрыс және плейлист ашық екеніне көз жеткізіңіз.",
         "pl_downloading": "📥 Плейлистті жүктеу басталды ({count} трек)...",
         "pl_mix_added": "✅ Плейлисттен <b>{count}</b> трек микс шеберіне қосылды!",
+        "btn_donate": "☕️ Жобаны қолдау",
+        "donate_title": (
+            "☕️ <b>SunoSaver жобасын қолдау</b>\n\n"
+            "Бот сіздердің қолдауларыңыздың арқасында жылдам, тегін және жарнамасыз жұмыс істейді! 🚀\n"
+            "Барлық қаражат серверлерді ұстауға және жаңа мүмкіндіктерді дамытуға жұмсалады.\n\n"
+            "Қолдау түрін таңдаңыз:"
+        ),
+        "btn_donate_stars": "⭐️ Telegram Stars (кез келген сома)",
+        "btn_donate_tribute": "💳 Tribute (Карталар / TON)",
+        "btn_donate_kaspi": "🇰🇿 Kaspi QR / Аударым",
+        "btn_donate_top": "🏆 Үздік демеушілер",
+        "donate_stars_prompt": "⭐️ <b>Telegram Stars арқылы қолдау</b>\n\nЖұлдыздар санын таңдаңыз немесе өз сомаңызды жазыңыз:",
+        "btn_custom_stars": "✍️ Өз сомамды жазу",
+        "donate_custom_ask": "✍️ Чатқа қанша жұлдыз жібергіңіз келетінін жазыңыз (1-ден 2500-ге дейін сан):",
+        "donate_custom_invalid": "❌ 1-ден 2500-ге дейінгі дұрыс жұлдыз санын енгізіңіз.",
+        "donate_kaspi_info": (
+            "🇰🇿 <b>Kaspi арқылы аудару:</b>\n\n"
+            "💳 <b>Карта нөмірі:</b>\n"
+            "<code>{card}</code> <i>(көшіру үшін басыңыз)</i>\n"
+            "👤 <b>Алушы:</b> {name}\n\n"
+            "❤️ Қолдауыңызға үлкен рақмет! Аударымнан кейін @youtubestanmanager парақшасына жазып, 🏆 Құрмет тақтасына қосылыңыз!"
+        ),
+        "donate_top_title": "🏆 <b>SunoSaver үздік демеушілер тақтасы:</b>\n\n{list}\n\n❤️ Әрбір демеушіге үлкен рақмет!",
+        "donate_top_empty": "🏆 <b>SunoSaver үздік демеушілер тақтасы:</b>\n\nӘзірге тізім бос — ең алғашқы демеуші бола аласыз! 🚀",
+        "donate_thanks": "🎉 <b>Қолдауыңызға үлкен рақмет!</b> ❤️\n\nСіз <b>{stars} ⭐️</b> жібердіңіз! Сіз 🏆 Үздік демеушілер тақтасына қосылдыңыз.",
+        "donate_soft_prompt": (
+            "☕️ <b>SunoSaver ұнап жатыр ма?</b>\n\n"
+            "Сіз қазірдің өзінде <b>{count} трек</b> жүктедіңіз! Егер бот сізге пайдалы болса, жобаны бір шыны кофе немесе жұлдыздармен қолдай аласыз ⭐️"
+        ),
     },
 }
 
@@ -980,12 +1077,39 @@ def get_main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=t["btn_create_mix"]), KeyboardButton(text=t["btn_pro"])],
+            [KeyboardButton(text=t["btn_donate"])],
             [KeyboardButton(text=t["btn_how_to"]),  KeyboardButton(text=t["btn_settings"])],
             [KeyboardButton(text=t["btn_about"]),    KeyboardButton(text=t["btn_channel"])],
         ],
         resize_keyboard=True,
         is_persistent=True,
     )
+
+
+def get_donate_inline_keyboard(lang: str) -> InlineKeyboardMarkup:
+    t = TEXTS[lang]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["btn_donate_stars"], callback_data="donate:stars")],
+        [InlineKeyboardButton(text=t["btn_donate_tribute"], url=TRIBUTE_URL)],
+        [InlineKeyboardButton(text=t["btn_donate_kaspi"], callback_data="donate:kaspi")],
+        [InlineKeyboardButton(text=t["btn_donate_top"], callback_data="donate:top")],
+    ])
+
+
+def get_stars_donate_keyboard(lang: str) -> InlineKeyboardMarkup:
+    t = TEXTS[lang]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⭐️ 15", callback_data="donate_star:15"),
+            InlineKeyboardButton(text="⭐️ 50", callback_data="donate_star:50"),
+        ],
+        [
+            InlineKeyboardButton(text="⭐️ 100", callback_data="donate_star:100"),
+            InlineKeyboardButton(text="⭐️ 250", callback_data="donate_star:250"),
+        ],
+        [InlineKeyboardButton(text=t["btn_custom_stars"], callback_data="donate_star:custom")],
+        [InlineKeyboardButton(text=t["mix_btn_back"], callback_data="donate:back")],
+    ])
 
 
 def get_language_inline_keyboard() -> InlineKeyboardMarkup:
@@ -1567,8 +1691,9 @@ async def _download_and_send(
                     parse_mode="HTML",
                 )
                 await database.increment_total_downloads()
-                await database.increment_daily_usage(effective_user_id, "downloads")
+                total_dl = await database.increment_daily_usage(effective_user_id, "downloads")
                 await database.save_user_track(effective_user_id, song_id, safe_title)
+                await _maybe_send_donate_prompt(message, effective_user_id, total_dl, lang)
                 return True
             except Exception as e:
                 logger.warning("Кэшированный file_id устарел, перекачиваем: %s", e)
@@ -1674,7 +1799,8 @@ async def _download_and_send(
             if original_song_id and original_song_id != song_id:
                 await database.save_track_cache(original_song_id, sent_msg.audio.file_id, safe_title, lyrics, artist=author, image_url=image_url)
             await database.save_user_track(effective_user_id, song_id or original_song_id, safe_title)
-            await database.increment_daily_usage(effective_user_id, "downloads")
+            total_dl = await database.increment_daily_usage(effective_user_id, "downloads")
+            await _maybe_send_donate_prompt(message, effective_user_id, total_dl, lang)
 
         delete_status = True
         return True
@@ -2297,6 +2423,189 @@ async def cmd_artist(message: types.Message, command: CommandObject):
             return
         await database.set_user_custom_artist(user_id, clean_name)
         await message.answer(t["artist_set_done"].format(artist=html.escape(clean_name)), parse_mode="HTML")
+
+
+# ─── Донаты и поддержка проекта (/donate) ──────────────────────────────────────
+
+async def send_stars_invoice(chat_id: int, amount: int, user_id: int, lang: str):
+    t = TEXTS.get(lang, TEXTS["ru"])
+    title = "Поддержка SunoSaver ⭐️" if lang == "ru" else ("Support SunoSaver ⭐️" if lang == "en" else "SunoSaver қолдау ⭐️")
+    description = (
+        f"Добровольный донат {amount} Stars на развитие и поддержку серверов бота"
+        if lang == "ru" else
+        (f"Donation of {amount} Stars for server hosting & bot development" if lang == "en" else f"Серверлерді ұстау мен ботты дамытуға {amount} Stars ерікті қолдау")
+    )
+    prices = [LabeledPrice(label=f"{amount} Stars", amount=amount)]
+    await bot.send_invoice(
+        chat_id=chat_id,
+        title=title,
+        description=description,
+        payload=f"donate_stars_{amount}_{user_id}_{int(time.time())}",
+        currency="XTR",
+        prices=prices,
+    )
+
+
+async def _maybe_send_donate_prompt(message: types.Message, user_id: int, total_dl: int, lang: str):
+    if total_dl > 0 and total_dl % 5 == 0:
+        now = time.time()
+        if now - _last_donate_prompt.get(user_id, 0) > 1800:
+            _last_donate_prompt[user_id] = now
+            t = TEXTS.get(lang, TEXTS["ru"])
+            try:
+                await message.answer(
+                    t["donate_soft_prompt"].format(count=total_dl),
+                    reply_markup=get_donate_inline_keyboard(lang),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+
+@dp.message(Command("donate"))
+@dp.message(Command("tip"))
+@dp.message(F.text.in_([t["btn_donate"] for t in TEXTS.values()]))
+async def cmd_donate(message: types.Message, command: CommandObject | None = None):
+    user_id = message.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+
+    if command and command.args and command.args.strip().isdigit():
+        amt = int(command.args.strip())
+        if 1 <= amt <= 2500:
+            await send_stars_invoice(message.chat.id, amt, user_id, lang)
+            return
+
+    await message.answer(t["donate_title"], reply_markup=get_donate_inline_keyboard(lang), parse_mode="HTML")
+
+
+@dp.callback_query(F.data == "donate:stars")
+async def cb_donate_stars(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+    await callback.answer()
+    await callback.message.edit_text(t["donate_stars_prompt"], reply_markup=get_stars_donate_keyboard(lang), parse_mode="HTML")
+
+
+@dp.callback_query(F.data == "donate:back")
+async def cb_donate_back(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+    await callback.answer()
+    await callback.message.edit_text(t["donate_title"], reply_markup=get_donate_inline_keyboard(lang), parse_mode="HTML")
+
+
+@dp.callback_query(F.data == "donate:kaspi")
+async def cb_donate_kaspi(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+    await callback.answer()
+    text = t["donate_kaspi_info"].format(card=KASPI_CARD, name=KASPI_NAME)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["mix_btn_back"], callback_data="donate:back")]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@dp.callback_query(F.data == "donate:top")
+async def cb_donate_top(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+    await callback.answer()
+    top_list = await database.get_top_donators(limit=5)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["mix_btn_back"], callback_data="donate:back")]
+    ])
+    if not top_list:
+        await callback.message.edit_text(t["donate_top_empty"], reply_markup=kb, parse_mode="HTML")
+        return
+
+    medals = ["🥇", "🥈", "🥉", "4.", "5."]
+    lines = []
+    for i, item in enumerate(top_list):
+        m = medals[i] if i < len(medals) else f"{i+1}."
+        u_name = html.escape(item["username"])
+        if not u_name.startswith("@") and not u_name.startswith("User_"):
+            u_name = f"@{u_name}"
+        lines.append(f"{m} <b>{u_name}</b> — {item['amount']} ⭐️")
+
+    text = t["donate_top_title"].format(list="\n".join(lines))
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("donate_star:"))
+async def cb_donate_star_amount(callback: CallbackQuery):
+    action = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+
+    if action == "custom":
+        _waiting_donate_stars[user_id] = True
+        await callback.answer()
+        await callback.message.answer(t["donate_custom_ask"], parse_mode="HTML")
+        return
+
+    if action.isdigit():
+        amt = int(action)
+        await callback.answer()
+        await send_stars_invoice(callback.message.chat.id, amt, user_id, lang)
+
+
+@dp.pre_checkout_query()
+async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
+    await pre_checkout_query.answer(ok=True)
+
+
+@dp.message(F.successful_payment)
+async def process_successful_payment(message: types.Message):
+    sp = message.successful_payment
+    amount = sp.total_amount
+    user_id = message.from_user.id
+    username = message.from_user.username or message.from_user.full_name or f"id{user_id}"
+    lang = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+
+    await database.save_donation(user_id, username, amount, currency=sp.currency)
+
+    # Благодарим пользователя
+    await message.answer(t["donate_thanks"].format(stars=amount), parse_mode="HTML")
+
+    # Уведомляем администратора
+    if ADMIN_ID:
+        try:
+            admin_text = (
+                f"🎉 <b>НОВЫЙ ДОНАТ!</b> ⭐️\n\n"
+                f"👤 Пользователь: @{html.escape(username)} (ID: <code>{user_id}</code>)\n"
+                f"💰 Сумма: <b>{amount} {sp.currency}</b>\n"
+                f"⏱ Время: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            )
+            await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML")
+        except Exception as e:
+            logger.warning("Не удалось уведомить админа о донате: %s", e)
+
+
+@dp.message(Command("add_donate"))
+async def cmd_add_donate(message: types.Message, command: CommandObject):
+    """Команда для админа: добавить донат вручную (например, с Kaspi/Tribute).
+    Использование: /add_donate @username 100"""
+    if message.from_user.id != ADMIN_ID:
+        return
+    if not command.args or len(command.args.split()) < 2:
+        await message.answer("Использование: <code>/add_donate @username 100</code>", parse_mode="HTML")
+        return
+    parts = command.args.split()
+    target_name = parts[0].lstrip("@")
+    if not parts[1].isdigit():
+        await message.answer("❌ Сумма должна быть числом.", parse_mode="HTML")
+        return
+    amt = int(parts[1])
+    await database.save_donation(user_id=0, username=target_name, amount=amt, currency="MANUAL")
+    await message.answer(f"✅ В топ спонсоров добавлен: <b>@{html.escape(target_name)}</b> — {amt} ⭐️", parse_mode="HTML")
 
 
 # ─── Смена языка ───────────────────────────────────────────────────────────────
@@ -3672,13 +3981,28 @@ async def handle_video_callback(callback: CallbackQuery):
 
 @dp.message(F.text)
 async def handle_suno_link(message: types.Message):
+    user_id = message.from_user.id
+    lang    = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
+    t       = TEXTS.get(lang, TEXTS["ru"])
+
+    # Если пользователь вводил кастомное количество Stars:
+    if _waiting_donate_stars.get(user_id):
+        clean_text = message.text.strip()
+        if clean_text.isdigit():
+            amt = int(clean_text)
+            if 1 <= amt <= 2500:
+                _waiting_donate_stars.pop(user_id, None)
+                await send_stars_invoice(message.chat.id, amt, user_id, lang)
+                return
+            else:
+                await message.answer(t["donate_custom_invalid"], parse_mode="HTML")
+                return
+        else:
+            _waiting_donate_stars.pop(user_id, None)
+
     suno_urls = find_all_suno_urls(message.text)
     if not suno_urls:
         return
-
-    user_id = message.from_user.id
-    lang    = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
-    t       = TEXTS[lang]
 
     # Блокировка
     if await database.is_user_banned(user_id):
@@ -3773,6 +4097,7 @@ async def setup_bot_commands():
         BotCommand(command="artist",   description="👤 Set custom artist name"),
         BotCommand(command="pro",      description="⭐️ PRO status & referrals"),
         BotCommand(command="mix",      description="Create a music mix"),
+        BotCommand(command="donate",   description="☕️ Support the bot / Donate"),
         BotCommand(command="help",     description="How to download"),
         BotCommand(command="about",    description="About SunoSaver"),
         BotCommand(command="settings", description="Change language"),
@@ -3782,6 +4107,7 @@ async def setup_bot_commands():
         BotCommand(command="artist",   description="👤 Настроить имя автора"),
         BotCommand(command="pro",      description="⭐️ PRO-статус и рефералка"),
         BotCommand(command="mix",      description="Собрать микс из песен"),
+        BotCommand(command="donate",   description="☕️ Поддержать бота / Донат"),
         BotCommand(command="help",     description="Инструкция"),
         BotCommand(command="about",    description="О сервисе"),
         BotCommand(command="settings", description="Сменить язык"),
@@ -3791,6 +4117,7 @@ async def setup_bot_commands():
         BotCommand(command="artist",   description="👤 Автор есімін баптау"),
         BotCommand(command="pro",      description="⭐️ PRO-статус және достар"),
         BotCommand(command="mix",      description="Әндерден микс жасау"),
+        BotCommand(command="donate",   description="☕️ Ботқа қолдау көрсету"),
         BotCommand(command="help",     description="Нұсқаулық"),
         BotCommand(command="about",    description="Бот туралы"),
         BotCommand(command="settings", description="Тілді өзгерту"),
