@@ -7,6 +7,7 @@ import re
 import ssl
 import tempfile
 import time
+import uuid
 from datetime import datetime
 
 import aiohttp
@@ -1521,15 +1522,18 @@ async def _download_and_send(
     t:         dict,
     track_num: int | None = None,
     total:     int | None = None,
+    user_id:   int | None = None,
+    user:      types.User | None = None,
 ) -> bool:
     """Скачивает и отправляет один трек. Возвращает True при успехе."""
-    user_id = message.from_user.id
+    effective_user_id = user_id if user_id is not None else message.from_user.id
+    effective_user = user if user is not None else message.from_user
 
     # ── Проверка дневного лимита скачиваний ───────────────────────────────────
-    is_pro = await database.is_user_pro(user_id, admin_id=ADMIN_ID)
-    allowed, current_dl = await database.check_daily_limit(user_id, "downloads", FREE_DAILY_DOWNLOADS, is_pro)
+    is_pro = await database.is_user_pro(effective_user_id, admin_id=ADMIN_ID)
+    allowed, current_dl = await database.check_daily_limit(effective_user_id, "downloads", FREE_DAILY_DOWNLOADS, is_pro)
     if not allowed:
-        ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
+        ref_url = f"https://t.me/sunosaver_bot?start=ref_{effective_user_id}"
         await message.answer(
             t["limit_downloads_reached"].format(limit=FREE_DAILY_DOWNLOADS, ref_url=ref_url),
             parse_mode="HTML"
@@ -1537,7 +1541,7 @@ async def _download_and_send(
         return False
 
     song_id = extract_song_id(suno_url)
-    custom_artist = await database.get_user_custom_artist(user_id)
+    custom_artist = await database.get_user_custom_artist(effective_user_id)
 
     # ── Кэш ──────────────────────────────────────────────────────────────────
     if song_id:
@@ -1563,8 +1567,8 @@ async def _download_and_send(
                     parse_mode="HTML",
                 )
                 await database.increment_total_downloads()
-                await database.increment_daily_usage(user_id, "downloads")
-                await database.save_user_track(user_id, song_id, safe_title)
+                await database.increment_daily_usage(effective_user_id, "downloads")
+                await database.save_user_track(effective_user_id, song_id, safe_title)
                 return True
             except Exception as e:
                 logger.warning("Кэшированный file_id устарел, перекачиваем: %s", e)
@@ -1630,7 +1634,7 @@ async def _download_and_send(
             else:
                 err_text = t["error_download"] + t.get("error_contact", "")
                 await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
-                await notify_admin_error("_download_and_send:download_failed", Exception("Не удалось скачать трек через Suno CDN и sunodownload.io"), f"URL: {suno_url}", user=message.from_user)
+                await notify_admin_error("_download_and_send:download_failed", Exception("Не удалось скачать трек через Suno CDN и sunodownload.io"), f"URL: {suno_url}", user=effective_user)
             return False
 
         original_song_id = song_id
@@ -1669,8 +1673,8 @@ async def _download_and_send(
                 await database.save_track_cache(song_id, sent_msg.audio.file_id, safe_title, lyrics, artist=author, image_url=image_url)
             if original_song_id and original_song_id != song_id:
                 await database.save_track_cache(original_song_id, sent_msg.audio.file_id, safe_title, lyrics, artist=author, image_url=image_url)
-            await database.save_user_track(message.from_user.id, song_id or original_song_id, safe_title)
-            await database.increment_daily_usage(message.from_user.id, "downloads")
+            await database.save_user_track(effective_user_id, song_id or original_song_id, safe_title)
+            await database.increment_daily_usage(effective_user_id, "downloads")
 
         delete_status = True
         return True
@@ -1692,7 +1696,7 @@ async def _download_and_send(
         return False
     except Exception as e:
         logger.error("Ошибка пайплайна: %s", e, exc_info=True)
-        await notify_admin_error("_download_and_send:exception", e, f"URL: {suno_url}", user=message.from_user)
+        await notify_admin_error("_download_and_send:exception", e, f"URL: {suno_url}", user=effective_user)
         err_text = t["error_telegram"] + t.get("error_contact", "")
         try:
             await status_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
@@ -2438,6 +2442,7 @@ async def handle_lyrics_callback(callback: CallbackQuery):
 
 _user_mix_queues: dict[int, list[dict]] = {}
 _user_mix_pages:  dict[int, int] = {}
+_quick_mix_store: dict[str, list[str]] = {}
 MIX_PAGE_SIZE = 8
 
 
@@ -2881,7 +2886,8 @@ async def handle_mix_mode(callback: CallbackQuery):
         # Прошиваем теги ID3
         mode_label = t["mix_mode_crossfade"] if mode == "crossfade" else t["mix_mode_normal"]
         mix_title = f"Suno Mix ({len(audio_tracks)} tracks)"
-        artist = "Suno AI (@sunosaver_bot)"
+        custom_artist = await database.get_user_custom_artist(user_id)
+        artist = custom_artist or "Suno AI (@sunosaver_bot)"
         tagged_mix, mix_duration = add_id3_tags(mix_bytes, mix_title, artist)
 
         track_count = len(audio_tracks)
@@ -2942,9 +2948,14 @@ async def handle_mix_mode(callback: CallbackQuery):
             pass
 
 
+@dp.callback_query(F.data.startswith("mix_q:"))
 @dp.callback_query(F.data.startswith("mix_quick:"))
 async def handle_mix_quick(callback: CallbackQuery):
-    raw_ids = callback.data.split(":", 1)[1].split(",")
+    payload = callback.data.split(":", 1)[1]
+    if payload in _quick_mix_store:
+        raw_ids = _quick_mix_store[payload]
+    else:
+        raw_ids = [s for s in payload.split(",") if s]
     user_id = callback.from_user.id
     lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
     t = TEXTS[lang]
@@ -2989,7 +3000,11 @@ async def handle_playlist_download(callback: CallbackQuery):
     await callback.message.answer(t["pl_downloading"].format(count=len(tracks)), parse_mode="HTML")
 
     for idx, tr in enumerate(tracks, 1):
-        await _download_and_send(callback.message, tr["url"], lang, t, track_num=idx, total=len(tracks))
+        await _download_and_send(
+            callback.message, tr["url"], lang, t,
+            track_num=idx, total=len(tracks),
+            user_id=user_id, user=callback.from_user
+        )
 
 
 @dp.callback_query(F.data.startswith("pl_mix:"))
@@ -3736,13 +3751,16 @@ async def handle_suno_link(message: types.Message):
     for idx, url in enumerate(suno_urls, 1):
         await _download_and_send(message, url, lang, t, track_num=idx, total=len(suno_urls))
 
-    # Если было прислано 2 или 3 ссылки, предлагаем сразу склеить их в микс
+    # Если было прислано 2 или более ссылок, предлагаем сразу склеить их в микс
     if len(suno_urls) >= 2:
         valid_ids = [extract_song_id(u) for u in suno_urls if extract_song_id(u)]
         if len(valid_ids) >= 2:
-            quick_ids = ",".join(valid_ids)
+            token = uuid.uuid4().hex[:10]
+            _quick_mix_store[token] = valid_ids
+            if len(_quick_mix_store) > 1000:
+                _quick_mix_store.clear()
             kb_mix = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text=t["btn_mix_these"], callback_data=f"mix_quick:{quick_ids}")
+                InlineKeyboardButton(text=t["btn_mix_these"], callback_data=f"mix_q:{token}")
             ]])
             await message.answer(f"🎛 <b>{t['btn_mix_these']}?</b>", reply_markup=kb_mix, parse_mode="HTML")
 
