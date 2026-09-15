@@ -4033,6 +4033,8 @@ async def separate_stems_demucs(
         sys.executable, "-m", "demucs",
         "-n", "htdemucs",
         "--two-stems=vocals",
+        "--shifts=0",
+        "--overlap=0.1",
         "--mp3",
         "--mp3-bitrate", "320",
         "-o", output_dir,
@@ -4185,7 +4187,7 @@ async def handle_stems_callback(callback: CallbackQuery):
                 try:
                     with open(vocals_path, "rb") as vf:
                         v_raw = vf.read()
-                    v_tagged, _ = set_mp3_metadata(v_raw, f"{safe_title} (Vocals)", artist, image_bytes)
+                    v_tagged, _ = add_id3_tags(v_raw, f"{safe_title} (Vocals)", artist, image_bytes)
                     with open(vocals_path, "wb") as vf:
                         vf.write(v_tagged)
                 except Exception as tag_err:
@@ -4195,7 +4197,7 @@ async def handle_stems_callback(callback: CallbackQuery):
                 try:
                     with open(inst_path, "rb") as ifile:
                         i_raw = ifile.read()
-                    i_tagged, _ = set_mp3_metadata(i_raw, f"{safe_title} (Instrumental)", artist, image_bytes)
+                    i_tagged, _ = add_id3_tags(i_raw, f"{safe_title} (Instrumental)", artist, image_bytes)
                     with open(inst_path, "wb") as ifile:
                         ifile.write(i_tagged)
                 except Exception as tag_err:
