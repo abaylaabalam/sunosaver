@@ -80,6 +80,11 @@ class TrackStillProcessingError(Exception):
     pass
 
 
+class WavTooLargeError(Exception):
+    """Вызывается, если WAV файл даже на минимальной частоте дискретизации превышает лимит Telegram (50 МБ)."""
+    pass
+
+
 # ─── Алерты об ошибках администратору ──────────────────────────────────────────
 _admin_error_timestamps: dict[str, float] = {}
 
@@ -94,7 +99,7 @@ async def notify_admin_error(
     if not ADMIN_ID:
         return
 
-    if isinstance(error, (TrackNotFoundError, TrackStillProcessingError)):
+    if isinstance(error, (TrackNotFoundError, TrackStillProcessingError, WavTooLargeError)):
         return
 
     err_type = type(error).__name__ if isinstance(error, Exception) else "Error"
@@ -240,6 +245,7 @@ TEXTS = {
         "lyrics_none":    "ℹ️ У этого трека нет текста (инструментал).",
         "wav_generating": "⏳ Конвертирую и загружаю WAV (30-50 МБ)...",
         "wav_error":      "❌ Не удалось подготовить WAV файл. Попробуйте позже.",
+        "wav_too_large":  "⚠️ Этот трек слишком длинный для формата WAV (лимит Telegram — 50 МБ).\nРекомендуем слушать или скачивать трек в формате MP3.",
         "video_generating":"⏳ Создаю и загружаю видеоклип (MP4)...",
         "video_error":    "❌ Не удалось подготовить видео. Попробуйте позже.",
         "btn_download_own": "🤖 Скачать свой трек",
@@ -395,6 +401,7 @@ TEXTS = {
         "lyrics_none":    "ℹ️ This track has no lyrics (instrumental).",
         "wav_generating": "⏳ Converting and uploading WAV (30-50 MB)...",
         "wav_error":      "❌ Could not prepare WAV file. Please try again later.",
+        "wav_too_large":  "⚠️ This track is too long for uncompressed WAV format (Telegram limit is 50 MB).\nPlease download the track in MP3 format.",
         "video_generating":"⏳ Generating and uploading video (MP4)...",
         "video_error":    "❌ Could not prepare video. Please try again later.",
         "btn_download_own": "🤖 Download Your Track",
@@ -550,6 +557,7 @@ TEXTS = {
         "lyrics_none":    "ℹ️ Бұл тректің сөзі жоқ (инструментал).",
         "wav_generating": "⏳ WAV пішіміне түрлендіру және жүктеу (30-50 МБ)...",
         "wav_error":      "❌ WAV файлын дайындау мүмкін болмады. Кейінірек көріңіз.",
+        "wav_too_large":  "⚠️ Бұл трек қысылмаған WAV пішімі үшін тым ұзын (Telegram шегі — 50 МБ).\nТректі MP3 пішімінде жүктеп алуды ұсынамыз.",
         "video_generating":"⏳ Бейнеклип (MP4) дайындалуда және жүктелуде...",
         "video_error":    "❌ Бейнені дайындау мүмкін болмады. Кейінірек көріңіз.",
         "btn_download_own": "🤖 Өз трегіңізді жүктеу",
@@ -2491,7 +2499,7 @@ async def handle_mix_quick(callback: CallbackQuery):
 async def _pcm_to_wav(input_bytes: bytes) -> bytes | None:
     """Конвертирует аудиопоток (m4a/mp4/mp3) в PCM WAV через временный файл на диске
     (гарантирует корректный RIFF-заголовок и точную длительность).
-    Автоматически подбирает частоту дискретизации (48kHz -> 44.1kHz -> 32kHz),
+    Автоматически подбирает частоту дискретизации (48kHz -> 44.1kHz -> 32kHz -> 24kHz -> 22.05kHz -> 16kHz),
     чтобы размер файла не превышал лимит Telegram Bot API (50 МБ)."""
     with tempfile.NamedTemporaryFile(suffix=".input", delete=False) as in_f:
         in_f.write(input_bytes)
@@ -2501,7 +2509,8 @@ async def _pcm_to_wav(input_bytes: bytes) -> bytes | None:
         out_path = out_f.name
 
     try:
-        for rate in ["48000", "44100", "32000"]:
+        rates = ["48000", "44100", "32000", "24000", "22050", "16000"]
+        for rate in rates:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y", "-i", in_path,
                 "-vn", "-c:a", "pcm_s16le", "-ar", rate,
@@ -2515,13 +2524,21 @@ async def _pcm_to_wav(input_bytes: bytes) -> bytes | None:
                 if 1000 < sz <= 49 * 1024 * 1024:
                     with open(out_path, "rb") as rf:
                         return rf.read()
-                elif sz > 49 * 1024 * 1024 and rate != "32000":
-                    logger.info("WAV > 49MB (%s байт) при %s Hz, пробуем меньший битрейт", sz, rate)
+                elif sz > 49 * 1024 * 1024:
+                    logger.info("WAV > 49MB (%s байт) при %s Hz, пробуем меньшую частоту дискретизации", sz, rate)
                     continue
-        if os.path.exists(out_path) and 1000 < os.path.getsize(out_path) <= 50 * 1024 * 1024:
-            with open(out_path, "rb") as rf:
-                return rf.read()
+
+        if os.path.exists(out_path):
+            final_sz = os.path.getsize(out_path)
+            if final_sz > 49 * 1024 * 1024:
+                logger.warning("WAV > 50MB (%s байт) даже при 16kHz", final_sz)
+                raise WavTooLargeError(f"WAV exceeds 50 MB limit: {final_sz} bytes")
+            elif 1000 < final_sz <= 50 * 1024 * 1024:
+                with open(out_path, "rb") as rf:
+                    return rf.read()
         return None
+    except WavTooLargeError:
+        raise
     except Exception as e:
         logger.warning("Ошибка конвертации в WAV: %s", e)
         return None
@@ -2661,6 +2678,8 @@ async def download_direct_wav_from_suno(
                 except Exception:
                     pass
 
+    except WavTooLargeError:
+        raise
     except Exception as e:
         logger.warning("Ошибка создания WAV: %s", e, exc_info=True)
 
@@ -2787,6 +2806,12 @@ async def handle_wav_callback(callback: CallbackQuery):
 
         await progress_msg.delete()
 
+    except WavTooLargeError:
+        try:
+            err_text = t.get("wav_too_large", "⚠️ Этот трек слишком длинный для формата WAV (лимит Telegram — 50 МБ).\nРекомендуем слушать или скачивать трек в формате MP3.") + t.get("error_contact", "")
+            await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+        except Exception:
+            pass
     except Exception as e:
         logger.error("Ошибка отправки WAV: %s", e, exc_info=True)
         await notify_admin_error("handle_wav_callback", e, f"song_id: {song_id}", user=callback.from_user)
