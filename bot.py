@@ -176,6 +176,43 @@ async def notify_admin_error(
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
 
+async def send_audio_safe(chat_id: int, message: types.Message | None = None, **kwargs) -> types.Message:
+    """Безопасная отправка аудио: сначала пробует message.reply_audio, если сообщение для reply не найдено — fallback на bot.send_audio."""
+    if message:
+        try:
+            return await message.reply_audio(**kwargs)
+        except Exception as e:
+            if "message to be replied not found" in str(e).lower():
+                logger.warning("Целевое сообщение для reply_audio не найдено, отправка через send_audio: %s", e)
+            else:
+                raise
+    return await bot.send_audio(chat_id=chat_id, **kwargs)
+
+async def send_video_safe(chat_id: int, message: types.Message | None = None, **kwargs) -> types.Message:
+    """Безопасная отправка видео: сначала пробует message.reply_video, если сообщение для reply не найдено — fallback на bot.send_video."""
+    if message:
+        try:
+            return await message.reply_video(**kwargs)
+        except Exception as e:
+            if "message to be replied not found" in str(e).lower():
+                logger.warning("Целевое сообщение для reply_video не найдено, отправка через send_video: %s", e)
+            else:
+                raise
+    return await bot.send_video(chat_id=chat_id, **kwargs)
+
+async def edit_or_send_status(status_msg: types.Message | None, chat_id: int, text: str, **kwargs) -> types.Message | None:
+    """Безопасное редактирование статус-сообщения с fallback на отправку нового сообщения, если сообщение удалено."""
+    if status_msg:
+        try:
+            return await status_msg.edit_text(text, **kwargs)
+        except Exception:
+            pass
+    try:
+        return await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+    except Exception as e:
+        logger.warning("Не удалось отправить статус-сообщение: %s", e)
+        return None
+
 # ─── Глобальные объекты (создаются внутри main() после старта event loop) ──────
 SEMAPHORE:    asyncio.Semaphore    | None = None
 HTTP_SESSION: aiohttp.ClientSession | None = None
@@ -2147,82 +2184,47 @@ async def cmd_stats(message: types.Message):
         except Exception as e:
             logger.warning("Не удалось получить число участников канала: %s", e)
 
-    # 1. Секция канала и обязательной подписки
-    channel_block = ""
-    if channel_info:
-        gain_sign = "+" if channel_info["gained_total"] >= 0 else ""
-        gain_today_sign = "+" if channel_info["gained_today"] >= 0 else ""
-        sub_pct = round((s["subscribed_users"] / s["total_users"] * 100), 1) if s["total_users"] > 0 else 0
-        channel_block = (
-            f"📢 <b>Канал {REQUIRED_CHANNEL}:</b>\n"
-            f"• Всего в канале: <b>{channel_info['current']:,}</b> подписчиков\n"
-            f"• Прирост подписчиков канала: <b>{gain_sign}{channel_info['gained_total']:,}</b> (за сегодня: <b>{gain_today_sign}{channel_info['gained_today']:,}</b>)\n"
-            f"• Подписано пользователей бота: <b>{s['subscribed_users']:,}</b> ({sub_pct}% базы)\n"
-            f"• Подписалось за последние 24ч: <b>+{s['subscribed_24h']:,}</b>\n\n"
-        )
-
-    # 2. Реальные и неактивные пользователи
     total_users = s["total_users"]
     real_users = s["real_users"]
     real_pct = round((real_users / total_users * 100), 1) if total_users > 0 else 0
-    inactive_users = max(0, total_users - real_users)
-    inactive_pct = round((inactive_users / total_users * 100), 1) if total_users > 0 else 0
+    sub_pct = round((s["subscribed_users"] / total_users * 100), 1) if total_users > 0 else 0
 
-    # 3. Источники трафика
-    source_names = {
-        "direct": "🔍 Прямой поиск / Органика",
-        "referral": "👥 Реферальная программа",
-    }
-    source_lines = []
-    for item in s.get("sources", []):
-        src_code = item["source"]
-        name = source_names.get(src_code, f"🔗 {src_code}")
-        source_lines.append(
-            f"  • {name}: <b>{item['count']}</b> ({item['percent']}%) "
-            f"| реальных: <b>{item['real_count']}</b> ({item['real_percent']}%)"
+    channel_line = ""
+    if channel_info:
+        gain_sign = "+" if channel_info["gained_total"] >= 0 else ""
+        gain_today_sign = "+" if channel_info["gained_today"] >= 0 else ""
+        channel_line = (
+            f"📢 <b>Канал:</b> <b>{channel_info['current']:,}</b> "
+            f"({gain_sign}{channel_info['gained_total']:,} всего, {gain_today_sign}{channel_info['gained_today']:,} сег.) | "
+            f"В боте: <b>{s['subscribed_users']:,}</b> ({sub_pct}%)\n\n"
         )
-    source_text = "\n".join(source_lines) if source_lines else "  • —"
 
-    # 4. Языки
-    lang_map = {
-        "ru": ("🇷🇺", "Русский"),
-        "kk": ("🇰🇿", "Қазақша"),
-        "en": ("🇬🇧", "English"),
-    }
-    lang_lines = []
-    for item in s.get("languages", []):
-        code = item["lang"]
-        flag, name = lang_map.get(code, ("🌐", code.upper()))
-        lang_lines.append(f"  {flag} {name}: <b>{item['count']}</b> ({item['percent']}%)")
-    lang_text = "\n".join(lang_lines) if lang_lines else "  —"
+    # Топ языки
+    lang_map = {"ru": "🇷🇺", "kk": "🇰🇿", "en": "🇬🇧"}
+    top_langs = [f"{lang_map.get(item['lang'], '🌐')} {item['lang'].upper()}: {item['percent']}%" for item in s.get("languages", [])[:3]]
+    langs_line = " | ".join(top_langs) if top_langs else "—"
+
+    # Топ источники
+    src_map = {"direct": "🔍 Поиск", "referral": "👥 Рефка", "donate": "⭐️ Донат"}
+    top_srcs = [f"{src_map.get(item['source'], item['source'])}: {item['count']}" for item in s.get("sources", [])[:4]]
+    srcs_line = " | ".join(top_srcs) if top_srcs else "—"
 
     text = (
-        f"📊 <b>Аналитика & Статистика SunoSaver</b>\n\n"
-        f"{channel_block}"
-        f"👥 <b>Пользователи бота:</b>\n"
-        f"• Всего пользователей: <b>{total_users:,}</b>\n"
-        f"• Реальных (скачивали треки): <b>{real_users:,}</b> ({real_pct}%)\n"
-        f"• Неактивных (только /start): <b>{inactive_users:,}</b> ({inactive_pct}%)\n"
-        f"• Новых за 24 часа: <b>+{s['new_users_24h']:,}</b>\n"
-        f"• Активных сегодня: <b>{s['active_users_today']:,}</b>\n"
-        f"• Активных за 7 дней: <b>{s['active_users_7d']:,}</b>\n"
-        f"• PRO-аккаунтов: <b>{s['pro_users']:,}</b>\n"
-        f"• Заблокировано: <b>{s['banned_users']:,}</b>\n\n"
-        f"📍 <b>Откуда пришли пользователи (Источники):</b>\n"
-        f"{source_text}\n\n"
-        f"🌍 <b>Языки аудитории:</b>\n"
-        f"{lang_text}\n\n"
-        f"⚡️ <b>Активность за сегодня:</b>\n"
-        f"• Скачиваний MP3: <b>{s['downloads_today']:,}</b>\n"
-        f"• Создано миксов: <b>{s['mixes_today']:,}</b>\n"
-        f"• Конвертаций в WAV: <b>{s['wav_today']:,}</b>\n\n"
-        f"💾 <b>Кэш и База данных:</b>\n"
-        f"• Скачано треков за всё время: <b>{s['total_downloads']:,}</b>\n"
-        f"• Создано миксов за всё время: <b>{s['total_mixes']:,}</b>\n"
-        f"• Сконвертировано WAV за всё время: <b>{s['total_wavs']:,}</b>\n"
-        f"• В кэше MP3 треков: <b>{s['cached_tracks']:,}</b>\n"
-        f"• В кэше MP4 (видео): <b>{s['cached_videos']:,}</b>\n"
-        f"• В кэше WAV (HD): <b>{s['cached_wavs']:,}</b>"
+        f"📊 <b>Статистика SunoSaver</b>\n\n"
+        f"{channel_line}"
+        f"👥 <b>Аудитория:</b>\n"
+        f"• Всего: <b>{total_users:,}</b> (+{s['new_users_24h']:,} за 24ч)\n"
+        f"• Реальных: <b>{real_users:,}</b> ({real_pct}%) | PRO: <b>{s['pro_users']:,}</b>\n"
+        f"• Активных: <b>{s['active_users_today']:,}</b> сег. | <b>{s['active_users_7d']:,}</b> за 7д\n"
+        f"• Языки: {langs_line}\n"
+        f"• Источники: {srcs_line}\n\n"
+        f"⚡️ <b>Сегодня:</b>\n"
+        f"• MP3: <b>{s['downloads_today']:,}</b> | Семы: <b>{s['stems_today']:,}</b> | WAV: <b>{s['wav_today']:,}</b> | Миксы: <b>{s['mixes_today']:,}</b>\n\n"
+        f"💰 <b>Донаты (поступило):</b>\n"
+        f"• Оплат: <b>{s['donations_count']}</b> на сумму <b>{s['donations_total']} ⭐️</b>\n\n"
+        f"💾 <b>База и кэш:</b>\n"
+        f"• Скачано всего: <b>{s['total_downloads']:,}</b> MP3 | {s['total_mixes']:,} миксов\n"
+        f"• В кэше: <b>{s['cached_tracks']:,}</b> аудио | <b>{s['cached_videos']:,}</b> видео | <b>{s['cached_wavs']:,}</b> WAV"
     )
     await message.answer(text, parse_mode="HTML")
 
@@ -3264,7 +3266,9 @@ async def handle_mix_mode(callback: CallbackQuery):
                 return
 
         audio_file = BufferedInputFile(tagged_mix, filename=f"Suno_Mix_{len(audio_tracks)}_tracks.mp3")
-        await callback.message.reply_audio(
+        await send_audio_safe(
+            chat_id=callback.message.chat.id,
+            message=callback.message,
             audio=audio_file,
             caption=caption,
             title=mix_title,
@@ -3621,7 +3625,9 @@ async def handle_wav_callback(callback: CallbackQuery):
     if cached_wav_fid:
         await callback.answer()
         try:
-            await callback.message.reply_audio(
+            await send_audio_safe(
+                chat_id=callback.message.chat.id,
+                message=callback.message,
                 audio=cached_wav_fid,
                 caption=caption,
                 title=f"{safe_title} (WAV)",
@@ -3646,7 +3652,9 @@ async def handle_wav_callback(callback: CallbackQuery):
         if not wav_bytes and resolved_uuid and resolved_uuid != song_id:
             uuid_cached_wav = await database.get_cached_wav(resolved_uuid)
             if uuid_cached_wav:
-                await callback.message.reply_audio(
+                await send_audio_safe(
+                    chat_id=callback.message.chat.id,
+                    message=callback.message,
                     audio=uuid_cached_wav,
                     caption=caption,
                     title=f"{safe_title} (WAV)",
@@ -3692,7 +3700,9 @@ async def handle_wav_callback(callback: CallbackQuery):
             pass
 
         wav_file = BufferedInputFile(wav_bytes, filename=f"{safe_title}.wav")
-        sent_msg = await callback.message.reply_audio(
+        sent_msg = await send_audio_safe(
+            chat_id=callback.message.chat.id,
+            message=callback.message,
             audio=wav_file,
             caption=caption,
             title=f"{safe_title} (WAV)",
@@ -3931,7 +3941,9 @@ async def handle_video_callback(callback: CallbackQuery):
     if cached_video_fid:
         await callback.answer()
         try:
-            await callback.message.reply_video(
+            await send_video_safe(
+                chat_id=callback.message.chat.id,
+                message=callback.message,
                 video=cached_video_fid,
                 caption=caption,
                 supports_streaming=True,
@@ -3954,7 +3966,9 @@ async def handle_video_callback(callback: CallbackQuery):
         if not video_res and resolved_uuid and resolved_uuid != song_id:
             uuid_cached_video = await database.get_cached_video(resolved_uuid)
             if uuid_cached_video:
-                await callback.message.reply_video(
+                await send_video_safe(
+                    chat_id=callback.message.chat.id,
+                    message=callback.message,
                     video=uuid_cached_video,
                     caption=caption,
                     supports_streaming=True,
@@ -3983,7 +3997,9 @@ async def handle_video_callback(callback: CallbackQuery):
             tmp_parent = os.path.dirname(video_res)
             video_input = FSInputFile(video_res, filename=f"{safe_title}.mp4")
 
-        sent_msg = await callback.message.reply_video(
+        sent_msg = await send_video_safe(
+            chat_id=callback.message.chat.id,
+            message=callback.message,
             video=video_input,
             caption=caption,
             supports_streaming=True,
@@ -4094,14 +4110,18 @@ async def handle_stems_callback(callback: CallbackQuery):
         vocals_fid, inst_fid = cached_stems
         await callback.answer()
         try:
-            await callback.message.reply_audio(
+            await send_audio_safe(
+                chat_id=callback.message.chat.id,
+                message=callback.message,
                 audio=vocals_fid,
                 caption=t["stems_success_vocals"].format(title=escaped_title, artist=artist),
                 title=f"{safe_title} (Vocals)",
                 performer=artist,
                 parse_mode="HTML",
             )
-            await callback.message.reply_audio(
+            await send_audio_safe(
+                chat_id=callback.message.chat.id,
+                message=callback.message,
                 audio=inst_fid,
                 caption=t["stems_success_inst"].format(title=escaped_title, artist=artist),
                 title=f"{safe_title} (Instrumental)",
@@ -4165,13 +4185,13 @@ async def handle_stems_callback(callback: CallbackQuery):
                         downloaded = True
 
                 if not downloaded or not os.path.exists(input_file):
-                    await status_msg.edit_text(t["stems_error"], parse_mode="HTML")
+                    await edit_or_send_status(status_msg, user_id, t["stems_error"], parse_mode="HTML")
                     return
 
                 # Запуск разделения нейросетью Demucs
                 vocals_path, inst_path = await separate_stems_demucs(input_file, tmp_dir)
                 if not vocals_path or not inst_path:
-                    await status_msg.edit_text(t["stems_error"], parse_mode="HTML")
+                    await edit_or_send_status(status_msg, user_id, t["stems_error"], parse_mode="HTML")
                     return
 
                 # Загружаем обложку трека
@@ -4207,7 +4227,9 @@ async def handle_stems_callback(callback: CallbackQuery):
                 v_file = FSInputFile(vocals_path, filename=f"{safe_title} (Vocals).mp3")
                 i_file = FSInputFile(inst_path, filename=f"{safe_title} (Instrumental).mp3")
 
-                msg_v = await callback.message.reply_audio(
+                msg_v = await send_audio_safe(
+                    chat_id=callback.message.chat.id,
+                    message=callback.message,
                     audio=v_file,
                     caption=t["stems_success_vocals"].format(title=escaped_title, artist=artist),
                     title=f"{safe_title} (Vocals)",
@@ -4216,7 +4238,9 @@ async def handle_stems_callback(callback: CallbackQuery):
                     parse_mode="HTML",
                 )
 
-                msg_i = await callback.message.reply_audio(
+                msg_i = await send_audio_safe(
+                    chat_id=callback.message.chat.id,
+                    message=callback.message,
                     audio=i_file,
                     caption=t["stems_success_inst"].format(title=escaped_title, artist=artist),
                     title=f"{safe_title} (Instrumental)",
@@ -4226,7 +4250,7 @@ async def handle_stems_callback(callback: CallbackQuery):
                 )
 
                 # Сохраняем в кэш
-                if msg_v.audio and msg_i.audio:
+                if msg_v and msg_v.audio and msg_i and msg_i.audio:
                     await database.save_track_stems(song_id, msg_v.audio.file_id, msg_i.audio.file_id)
 
                 await database.increment_daily_usage(user_id, "stems")
@@ -4238,11 +4262,7 @@ async def handle_stems_callback(callback: CallbackQuery):
 
     except Exception as e:
         logger.error("Ошибка при разделении стемов: %s", e, exc_info=True)
-        if status_msg:
-            try:
-                await status_msg.edit_text(t["stems_error"], parse_mode="HTML")
-            except Exception:
-                pass
+        await edit_or_send_status(status_msg, user_id, t["stems_error"], parse_mode="HTML")
     finally:
         _stems_queue_count = max(0, _stems_queue_count - 1)
 

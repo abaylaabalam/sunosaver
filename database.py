@@ -643,9 +643,14 @@ async def get_stats() -> dict:
             row = await cursor.fetchone()
             active_users_today = row[0] if row else 0
 
-        async with db.execute("SELECT COALESCE(SUM(downloads_count), 0), COALESCE(SUM(mixes_count), 0), COALESCE(SUM(wav_count), 0) FROM daily_usage WHERE date_str = date('now')") as cursor:
+        async with db.execute("SELECT COALESCE(SUM(downloads_count), 0), COALESCE(SUM(mixes_count), 0), COALESCE(SUM(wav_count), 0), COALESCE(SUM(stems_count), 0) FROM daily_usage WHERE date_str = date('now')") as cursor:
             row = await cursor.fetchone()
-            dl_today, mix_today, wav_today = (row[0], row[1], row[2]) if row else (0, 0, 0)
+            dl_today, mix_today, wav_today, stems_today = (row[0], row[1], row[2], row[3]) if row else (0, 0, 0, 0)
+
+        # Реально поступившие донаты
+        async with db.execute("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM donations") as cursor:
+            row = await cursor.fetchone()
+            donations_count, donations_total = (row[0], row[1]) if row else (0, 0)
 
         # Всего миксов и WAV за всё время
         async with db.execute("SELECT COALESCE(SUM(mixes_count), 0), COALESCE(SUM(wav_count), 0) FROM daily_usage") as cursor:
@@ -742,6 +747,9 @@ async def get_stats() -> dict:
         "downloads_today": dl_today,
         "mixes_today": mix_today,
         "wav_today": wav_today,
+        "stems_today": stems_today,
+        "donations_count": donations_count,
+        "donations_total": donations_total,
         "total_mixes": total_mixes,
         "total_wavs": total_wavs,
         "languages": languages,
