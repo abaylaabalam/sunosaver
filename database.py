@@ -377,6 +377,14 @@ async def increment_daily_usage(user_id: int, action: str) -> int:
     return total_downloads
 
 
+async def get_user_downloads_count(user_id: int) -> int:
+    """Возвращает общее количество скачанных пользователем треков."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT downloads_count FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row and row[0] else 0
+
+
 async def save_donation(user_id: int, username: str | None, amount: int, currency: str = "XTR"):
     """Сохраняет донат пользователя."""
     clean_username = (username or f"User_{user_id}").lstrip("@")[:64]

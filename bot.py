@@ -302,6 +302,7 @@ TEXTS = {
         "btn_lyrics":     "📜 Текст песни",
         "btn_wav":        "🎼 Скачать WAV",
         "btn_video":      "🎬 Скачать видео",
+        "btn_donate_author": "⭐️ Поддержать автора",
         "btn_stems":      "🎙 Вокал и Минус",
         "stems_btn_vocals": "🎙 Вокал (Акапелла)",
         "stems_btn_instrumental": "🎹 Минус (Караоке)",
@@ -526,6 +527,7 @@ TEXTS = {
         "btn_lyrics":     "📜 Lyrics",
         "btn_wav":        "🎼 Download WAV",
         "btn_video":      "🎬 Download Video",
+        "btn_donate_author": "⭐️ Support Author",
         "btn_stems":      "🎙 Vocals & Instrumental",
         "stems_btn_vocals": "🎙 Vocals (Acapella)",
         "stems_btn_instrumental": "🎹 Instrumental (Karaoke)",
@@ -750,6 +752,7 @@ TEXTS = {
         "btn_lyrics":     "📜 Ән мәтіні",
         "btn_wav":        "🎼 WAV жүктеу",
         "btn_video":      "🎬 Видео жүктеу",
+        "btn_donate_author": "⭐️ Авторды қолдау",
         "btn_stems":      "🎙 Вокал пен Минус",
         "stems_btn_vocals": "🎙 Вокал (Акапелла)",
         "stems_btn_instrumental": "🎹 Минус (Караоке)",
@@ -1128,11 +1131,12 @@ def get_track_inline_keyboard(
     lang: str,
     song_id: str | None = None,
     has_lyrics: bool = True,
+    show_donate: bool = False,
 ) -> InlineKeyboardMarkup | None:
     if not song_id:
         return None
-    t = TEXTS[lang]
-    return InlineKeyboardMarkup(inline_keyboard=[
+    t = TEXTS.get(lang, TEXTS["ru"])
+    rows = [
         [
             InlineKeyboardButton(text=t["btn_stems"], callback_data=f"stems:{song_id}"),
         ],
@@ -1143,7 +1147,12 @@ def get_track_inline_keyboard(
         [
             InlineKeyboardButton(text=t["btn_video"], callback_data=f"video:{song_id}"),
         ],
-    ])
+    ]
+    if show_donate:
+        rows.append([
+            InlineKeyboardButton(text=t.get("btn_donate_author", "⭐️ Поддержать автора"), callback_data="donate:stars"),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def get_main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
@@ -1755,7 +1764,9 @@ async def _download_and_send(
             caption = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
             logger.info("Из кэша: %s", song_id)
             try:
-                reply_markup = get_track_inline_keyboard(lang, song_id)
+                user_dl = await database.get_user_downloads_count(effective_user_id)
+                show_donate = ((user_dl + 1) % 5 == 0)
+                reply_markup = get_track_inline_keyboard(lang, song_id, show_donate=show_donate)
                 await message.answer_audio(
                     audio=cached_fid,
                     caption=caption,
@@ -1765,9 +1776,8 @@ async def _download_and_send(
                     parse_mode="HTML",
                 )
                 await database.increment_total_downloads()
-                total_dl = await database.increment_daily_usage(effective_user_id, "downloads")
+                await database.increment_daily_usage(effective_user_id, "downloads")
                 await database.save_user_track(effective_user_id, song_id, safe_title)
-                await _maybe_send_donate_prompt(message, effective_user_id, total_dl, lang)
                 return True
             except Exception as e:
                 logger.warning("Кэшированный file_id устарел, перекачиваем: %s", e)
@@ -1853,7 +1863,9 @@ async def _download_and_send(
         audio_file     = BufferedInputFile(tagged_audio, filename=f"{safe_title}.mp3")
         thumb_file     = BufferedInputFile(image_bytes, filename="cover.jpg") if image_bytes else None
         caption        = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
-        reply_markup   = get_track_inline_keyboard(lang, song_id)
+        user_dl        = await database.get_user_downloads_count(effective_user_id)
+        show_donate    = ((user_dl + 1) % 5 == 0)
+        reply_markup   = get_track_inline_keyboard(lang, song_id, show_donate=show_donate)
 
         # ── Отправка ──────────────────────────────────────────────────────────
         sent_msg = await message.answer_audio(
@@ -1873,8 +1885,7 @@ async def _download_and_send(
             if original_song_id and original_song_id != song_id:
                 await database.save_track_cache(original_song_id, sent_msg.audio.file_id, safe_title, lyrics, artist=author, image_url=image_url)
             await database.save_user_track(effective_user_id, song_id or original_song_id, safe_title)
-            total_dl = await database.increment_daily_usage(effective_user_id, "downloads")
-            await _maybe_send_donate_prompt(message, effective_user_id, total_dl, lang)
+            await database.increment_daily_usage(effective_user_id, "downloads")
 
         delete_status = True
         return True
@@ -2529,7 +2540,16 @@ async def cb_donate_stars(callback: CallbackQuery):
     lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
     t = TEXTS.get(lang, TEXTS["ru"])
     await callback.answer()
-    await callback.message.edit_text(t["donate_stars_prompt"], reply_markup=get_stars_donate_keyboard(lang), parse_mode="HTML")
+    if callback.message and callback.message.text:
+        try:
+            await callback.message.edit_text(t["donate_stars_prompt"], reply_markup=get_stars_donate_keyboard(lang), parse_mode="HTML")
+            return
+        except Exception:
+            pass
+    try:
+        await callback.message.reply(t["donate_stars_prompt"], reply_markup=get_stars_donate_keyboard(lang), parse_mode="HTML")
+    except Exception:
+        await bot.send_message(chat_id=callback.message.chat.id, text=t["donate_stars_prompt"], reply_markup=get_stars_donate_keyboard(lang), parse_mode="HTML")
 
 
 @dp.callback_query(F.data == "donate:back")
