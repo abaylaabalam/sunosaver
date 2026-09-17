@@ -280,7 +280,17 @@ TEXTS = {
             "• 📦 <b>Пакетная загрузка</b> — до 5 ссылок одновременно в сообщении.\n"
             "• 🌍 <b>Мультиязычность</b> — Русский, English, Қазақша.\n\n"
             f"📢 <b>Наш официальный канал:</b> {CHANNEL_URL}\n"
-            f"💬 <b>Поддержка:</b> @youtubestanmanager"
+            f"💬 <b>Поддержка:</b> @youtubestanmanager\n"
+            f"🔒 <b>Конфиденциальность:</b> /privacy"
+        ),
+        "privacy": (
+            "🔒 <b>Политика конфиденциальности SunoSaver</b>\n\n"
+            "Мы уважительно относимся к вашей приватности и строго следуем принципу минимизации данных:\n\n"
+            "• <b>Что мы сохраняем:</b> ваш числовой Telegram ID, имя/username, выбранный язык, личную библиотеку треков и счётчики скачиваний для соблюдения лимитов Fair Use.\n"
+            "• <b>Что мы НЕ собираем:</b> бот не имеет доступа к вашим личным сообщениям, банковским картам и аккаунтам Suno. Все донаты звёздами обрабатываются безопасно платформой Telegram.\n"
+            "• <b>Временные файлы:</b> все треки, стемы и видео удаляются с нашего сервера сразу после отправки вам в чат.\n"
+            "• <b>Удаление данных:</b> вы имеете право на полное забвение. Для безвозвратного удаления вашего профиля напишите в поддержку: @youtubestanmanager.\n\n"
+            "📄 <i>Мы никогда не продаём и не передаём ваши данные третьим лицам или рекламным сетям.</i>"
         ),
         "settings":      "⚙️ <b>Настройки интерфейса</b>\n\nВыберите язык:",
         "lang_changed":  "✅ Язык переключен на <b>Русский</b>!",
@@ -505,7 +515,17 @@ TEXTS = {
             "• 📦 <b>Batch Downloads</b> — up to 5 links in one message.\n"
             "• 🌍 <b>Multilingual</b> — Russian, English, Kazakh.\n\n"
             f"📢 <b>Official Channel:</b> {CHANNEL_URL}\n"
-            f"💬 <b>Support:</b> @youtubestanmanager"
+            f"💬 <b>Support:</b> @youtubestanmanager\n"
+            f"🔒 <b>Privacy:</b> /privacy"
+        ),
+        "privacy": (
+            "🔒 <b>SunoSaver Privacy Policy</b>\n\n"
+            "We respect your privacy and adhere strictly to data minimization standards:\n\n"
+            "• <b>What we store:</b> your numeric Telegram ID, username, selected language, personal track library, and usage counters to enforce fair daily limits.\n"
+            "• <b>What we DO NOT collect:</b> we never access your personal messages, bank accounts, or Suno login credentials. All Stars donations are handled securely by Telegram.\n"
+            "• <b>Temporary files:</b> all processed audio, stems, and videos are permanently deleted from our server immediately after delivery to your chat.\n"
+            "• <b>Data erasure:</b> you have the right to be forgotten. To request full deletion of your user record, contact: @youtubestanmanager.\n\n"
+            "📄 <i>We never sell, rent, or transfer your personal data to third parties or advertising networks.</i>"
         ),
         "settings":      "⚙️ <b>Settings</b>\n\nChoose language:",
         "lang_changed":  "✅ Language changed to <b>English</b>!",
@@ -730,7 +750,17 @@ TEXTS = {
             "• 📦 <b>Топтама жүктеу</b> — бір хабарламада бірден 5 сілтемеге дейін.\n"
             "• 🌍 <b>3 тілді толық қолдау</b> — Қазақша, Орысша, Ағылшынша.\n\n"
             f"📢 <b>Біздің ресми арна:</b> {CHANNEL_URL}\n"
-            f"💬 <b>Қолдау қызметі:</b> @youtubestanmanager"
+            f"💬 <b>Қолдау қызметі:</b> @youtubestanmanager\n"
+            f"🔒 <b>Құпиялылық:</b> /privacy"
+        ),
+        "privacy": (
+            "🔒 <b>SunoSaver Құпиялылық саясаты</b>\n\n"
+            "Біз сіздің жеке ақпаратыңыздың құпиялылығын құрметтейміз және деректерді минималды жинау қағидасын ұстанамыз:\n\n"
+            "• <b>Біз нені сақтаймыз:</b> сандық Telegram ID, аты-жөніңіз/username, таңдалған тіл, жеке кітапхана және жүктеулер саны (Fair Use шектеулері үшін).\n"
+            "• <b>Біз нені ЖИНАМАЙМЫЗ:</b> бот сіздің жеке хаттарыңызға, банк карталарыңызға және Suno аккаунттарына кіре алмайды. Барлық Stars төлемдері қауіпсіз Telegram арқылы өңделеді.\n"
+            "• <b>Уақытша файлдар:</b> өңделген барлық әндер мен вокал/минустар чатқа жіберілген бойда серверден өшіріледі.\n"
+            "• <b>Деректерді өшіру:</b> жеке деректеріңізді толық өшіру құқығыңыз бар. Ол үшін қолдауға жазыңыз: @youtubestanmanager.\n\n"
+            "📄 <i>Біз сіздің деректеріңізді үшінші тұлғаларға немесе жарнама желілеріне ешқашан сатпаймыз.</i>"
         ),
         "settings":      "⚙️ <b>Интерфейс баптаулары</b>\n\nТілді таңдаңыз:",
         "lang_changed":  "✅ Тіл <b>Қазақ тіліне</b> ауыстырылды!",
@@ -2442,6 +2472,13 @@ async def btn_settings(message: types.Message):
 async def btn_about(message: types.Message):
     lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
     await message.answer(TEXTS[lang]["about"], parse_mode="HTML")
+
+
+@dp.message(Command("privacy"))
+async def cmd_privacy(message: types.Message):
+    lang = await database.get_user_language(message.from_user.id, get_lang_fallback(message.from_user))
+    await message.answer(TEXTS[lang]["privacy"], parse_mode="HTML")
+
 
 
 @dp.message(F.text.in_([t["btn_channel"] for t in TEXTS.values()]))
@@ -4410,6 +4447,7 @@ async def setup_bot_commands():
         BotCommand(command="donate",   description="☕️ Support the bot / Donate"),
         BotCommand(command="help",     description="How to download"),
         BotCommand(command="about",    description="About SunoSaver"),
+        BotCommand(command="privacy",  description="🔒 Privacy Policy"),
         BotCommand(command="settings", description="Change language"),
     ], scope=BotCommandScopeDefault())
     await bot.set_my_commands([
@@ -4420,6 +4458,7 @@ async def setup_bot_commands():
         BotCommand(command="donate",   description="☕️ Поддержать бота / Донат"),
         BotCommand(command="help",     description="Инструкция"),
         BotCommand(command="about",    description="О сервисе"),
+        BotCommand(command="privacy",  description="🔒 Политика конфиденциальности"),
         BotCommand(command="settings", description="Сменить язык"),
     ], scope=BotCommandScopeDefault(), language_code="ru")
     await bot.set_my_commands([
@@ -4430,6 +4469,7 @@ async def setup_bot_commands():
         BotCommand(command="donate",   description="☕️ Ботқа қолдау көрсету"),
         BotCommand(command="help",     description="Нұсқаулық"),
         BotCommand(command="about",    description="Бот туралы"),
+        BotCommand(command="privacy",  description="🔒 Құпиялылық саясаты"),
         BotCommand(command="settings", description="Тілді өзгерту"),
     ], scope=BotCommandScopeDefault(), language_code="kk")
 
