@@ -177,28 +177,60 @@ bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
 
 async def send_audio_safe(chat_id: int, message: types.Message | None = None, **kwargs) -> types.Message:
-    """Безопасная отправка аудио: сначала пробует message.reply_audio, если сообщение для reply не найдено — fallback на bot.send_audio."""
-    if message:
-        try:
-            return await message.reply_audio(**kwargs)
-        except Exception as e:
-            if "message to be replied not found" in str(e).lower():
-                logger.warning("Целевое сообщение для reply_audio не найдено, отправка через send_audio: %s", e)
-            else:
-                raise
-    return await bot.send_audio(chat_id=chat_id, **kwargs)
+    """Безопасная отправка аудио: сначала пробует message.reply_audio, если сообщение для reply не найдено — fallback на bot.send_audio.
+    При ошибке парсинга HTML переотправляет с очищенным от HTML текстом."""
+    try:
+        if message:
+            try:
+                return await message.reply_audio(**kwargs)
+            except Exception as e:
+                if "message to be replied not found" in str(e).lower():
+                    logger.warning("Целевое сообщение для reply_audio не найдено, отправка через send_audio: %s", e)
+                else:
+                    raise
+        return await bot.send_audio(chat_id=chat_id, **kwargs)
+    except TelegramBadRequest as t_err:
+        if "can't parse entities" in str(t_err).lower() and kwargs.get("parse_mode"):
+            logger.warning("Ошибка парсинга HTML в send_audio_safe, повтор без HTML-разметки: %s", t_err)
+            clean_kwargs = dict(kwargs)
+            clean_kwargs.pop("parse_mode", None)
+            if "caption" in clean_kwargs:
+                clean_kwargs["caption"] = re.sub(r"<[^>]+>", "", str(clean_kwargs["caption"]))
+            if message:
+                try:
+                    return await message.reply_audio(**clean_kwargs)
+                except Exception:
+                    pass
+            return await bot.send_audio(chat_id=chat_id, **clean_kwargs)
+        raise
 
 async def send_video_safe(chat_id: int, message: types.Message | None = None, **kwargs) -> types.Message:
-    """Безопасная отправка видео: сначала пробует message.reply_video, если сообщение для reply не найдено — fallback на bot.send_video."""
-    if message:
-        try:
-            return await message.reply_video(**kwargs)
-        except Exception as e:
-            if "message to be replied not found" in str(e).lower():
-                logger.warning("Целевое сообщение для reply_video не найдено, отправка через send_video: %s", e)
-            else:
-                raise
-    return await bot.send_video(chat_id=chat_id, **kwargs)
+    """Безопасная отправка видео: сначала пробует message.reply_video, если сообщение для reply не найдено — fallback на bot.send_video.
+    При ошибке парсинга HTML переотправляет с очищенным от HTML текстом."""
+    try:
+        if message:
+            try:
+                return await message.reply_video(**kwargs)
+            except Exception as e:
+                if "message to be replied not found" in str(e).lower():
+                    logger.warning("Целевое сообщение для reply_video не найдено, отправка через send_video: %s", e)
+                else:
+                    raise
+        return await bot.send_video(chat_id=chat_id, **kwargs)
+    except TelegramBadRequest as t_err:
+        if "can't parse entities" in str(t_err).lower() and kwargs.get("parse_mode"):
+            logger.warning("Ошибка парсинга HTML в send_video_safe, повтор без HTML-разметки: %s", t_err)
+            clean_kwargs = dict(kwargs)
+            clean_kwargs.pop("parse_mode", None)
+            if "caption" in clean_kwargs:
+                clean_kwargs["caption"] = re.sub(r"<[^>]+>", "", str(clean_kwargs["caption"]))
+            if message:
+                try:
+                    return await message.reply_video(**clean_kwargs)
+                except Exception:
+                    pass
+            return await bot.send_video(chat_id=chat_id, **clean_kwargs)
+        raise
 
 async def edit_or_send_status(status_msg: types.Message | None, chat_id: int, text: str, **kwargs) -> types.Message | None:
     """Безопасное редактирование статус-сообщения с fallback на отправку нового сообщения, если сообщение удалено."""
@@ -1791,20 +1823,34 @@ async def _download_and_send(
             safe_title = cached_title or "Suno Track"
             escaped_title = html.escape(safe_title)
             artist = custom_artist or cached_artist or "Suno AI (@sunosaver_bot)"
-            caption = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
+            escaped_artist = html.escape(artist)
+            caption = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {escaped_artist}"
             logger.info("Из кэша: %s", song_id)
             try:
                 user_dl = await database.get_user_downloads_count(effective_user_id)
                 show_donate = ((user_dl + 1) % 5 == 0)
                 reply_markup = get_track_inline_keyboard(lang, song_id, show_donate=show_donate)
-                await message.answer_audio(
-                    audio=cached_fid,
-                    caption=caption,
-                    title=safe_title,
-                    performer=artist,
-                    reply_markup=reply_markup,
-                    parse_mode="HTML",
-                )
+                try:
+                    await message.answer_audio(
+                        audio=cached_fid,
+                        caption=caption,
+                        title=safe_title,
+                        performer=artist,
+                        reply_markup=reply_markup,
+                        parse_mode="HTML",
+                    )
+                except TelegramBadRequest as tb_err:
+                    if "can't parse entities" in str(tb_err).lower():
+                        clean_caption = f"🎵 {safe_title}\n{t.get('artist_label', 'Author')}: {artist}"
+                        await message.answer_audio(
+                            audio=cached_fid,
+                            caption=clean_caption,
+                            title=safe_title,
+                            performer=artist,
+                            reply_markup=reply_markup,
+                        )
+                    else:
+                        raise
                 await database.increment_total_downloads()
                 await database.increment_daily_usage(effective_user_id, "downloads")
                 await database.save_user_track(effective_user_id, song_id, safe_title)
@@ -1889,25 +1935,41 @@ async def _download_and_send(
         safe_title     = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
         escaped_title  = html.escape(safe_title)
         artist         = custom_artist or author or "Suno AI (@sunosaver_bot)"
+        escaped_artist = html.escape(artist)
         tagged_audio, duration_sec = add_id3_tags(raw_audio, safe_title, artist, image_bytes=image_bytes)
         audio_file     = BufferedInputFile(tagged_audio, filename=f"{safe_title}.mp3")
         thumb_file     = BufferedInputFile(image_bytes, filename="cover.jpg") if image_bytes else None
-        caption        = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {artist}"
+        caption        = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {escaped_artist}"
         user_dl        = await database.get_user_downloads_count(effective_user_id)
         show_donate    = ((user_dl + 1) % 5 == 0)
         reply_markup   = get_track_inline_keyboard(lang, song_id, show_donate=show_donate)
 
         # ── Отправка ──────────────────────────────────────────────────────────
-        sent_msg = await message.answer_audio(
-            audio=audio_file,
-            thumbnail=thumb_file,
-            caption=caption,
-            title=safe_title,
-            performer=artist,
-            duration=duration_sec if duration_sec > 0 else None,
-            reply_markup=reply_markup,
-            parse_mode="HTML",
-        )
+        try:
+            sent_msg = await message.answer_audio(
+                audio=audio_file,
+                thumbnail=thumb_file,
+                caption=caption,
+                title=safe_title,
+                performer=artist,
+                duration=duration_sec if duration_sec > 0 else None,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+        except TelegramBadRequest as tb_err:
+            if "can't parse entities" in str(tb_err).lower():
+                clean_caption = f"🎵 {safe_title}\n{t.get('artist_label', 'Author')}: {artist}"
+                sent_msg = await message.answer_audio(
+                    audio=audio_file,
+                    thumbnail=thumb_file,
+                    caption=clean_caption,
+                    title=safe_title,
+                    performer=artist,
+                    duration=duration_sec if duration_sec > 0 else None,
+                    reply_markup=reply_markup,
+                )
+            else:
+                raise
 
         if sent_msg.audio:
             if song_id:
@@ -3675,9 +3737,11 @@ async def handle_wav_callback(callback: CallbackQuery):
     cached_track = await database.get_cached_track(song_id)
     title = cached_track[1] if cached_track and cached_track[1] else "Suno Track"
     safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
-    escaped_title = html.escape(safe_title)
-    artist = "Suno AI (@sunosaver_bot)"
-    caption = f"🎼 <b>{escaped_title} (WAV)</b>\n{t['artist_label']}: {artist}"
+    custom_artist = await database.get_user_custom_artist(user_id)
+    cached_artist = cached_track[3] if cached_track and len(cached_track) > 3 and cached_track[3] else None
+    artist = custom_artist or cached_artist or "Suno AI (@sunosaver_bot)"
+    escaped_artist = html.escape(artist)
+    caption = f"🎼 <b>{escaped_title} (WAV)</b>\n{t['artist_label']}: {escaped_artist}"
 
     if cached_wav_fid:
         await callback.answer()
@@ -3743,7 +3807,7 @@ async def handle_wav_callback(callback: CallbackQuery):
         if extracted_title and extracted_title != "Suno Track":
             safe_title = re.sub(r'[\\/*?:"<>|]', "", extracted_title).strip() or safe_title
             escaped_title = html.escape(safe_title)
-            caption = f"🎼 <b>{escaped_title} (WAV)</b>\n{t['artist_label']}: {artist}"
+            caption = f"🎼 <b>{escaped_title} (WAV)</b>\n{t['artist_label']}: {escaped_artist}"
 
         wav_duration = None
         try:
@@ -4160,6 +4224,7 @@ async def handle_stems_callback(callback: CallbackQuery):
     safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
     escaped_title = html.escape(safe_title)
     artist = (cached_track[3] if cached_track and len(cached_track) > 3 and cached_track[3] else None) or "Suno AI (@sunosaver_bot)"
+    escaped_artist = html.escape(artist)
 
     # 1. Проверяем кэш стемов
     cached_stems = await database.get_cached_stems(song_id)
@@ -4171,7 +4236,7 @@ async def handle_stems_callback(callback: CallbackQuery):
                 chat_id=callback.message.chat.id,
                 message=callback.message,
                 audio=vocals_fid,
-                caption=t["stems_success_vocals"].format(title=escaped_title, artist=artist),
+                caption=t["stems_success_vocals"].format(title=escaped_title, artist=escaped_artist),
                 title=f"{safe_title} (Vocals)",
                 performer=artist,
                 parse_mode="HTML",
@@ -4180,7 +4245,7 @@ async def handle_stems_callback(callback: CallbackQuery):
                 chat_id=callback.message.chat.id,
                 message=callback.message,
                 audio=inst_fid,
-                caption=t["stems_success_inst"].format(title=escaped_title, artist=artist),
+                caption=t["stems_success_inst"].format(title=escaped_title, artist=escaped_artist),
                 title=f"{safe_title} (Instrumental)",
                 performer=artist,
                 parse_mode="HTML",
@@ -4288,7 +4353,7 @@ async def handle_stems_callback(callback: CallbackQuery):
                     chat_id=callback.message.chat.id,
                     message=callback.message,
                     audio=v_file,
-                    caption=t["stems_success_vocals"].format(title=escaped_title, artist=artist),
+                    caption=t["stems_success_vocals"].format(title=escaped_title, artist=escaped_artist),
                     title=f"{safe_title} (Vocals)",
                     performer=artist,
                     request_timeout=180,
@@ -4299,7 +4364,7 @@ async def handle_stems_callback(callback: CallbackQuery):
                     chat_id=callback.message.chat.id,
                     message=callback.message,
                     audio=i_file,
-                    caption=t["stems_success_inst"].format(title=escaped_title, artist=artist),
+                    caption=t["stems_success_inst"].format(title=escaped_title, artist=escaped_artist),
                     title=f"{safe_title} (Instrumental)",
                     performer=artist,
                     request_timeout=180,
