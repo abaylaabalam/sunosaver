@@ -206,18 +206,38 @@ async def register_or_get_user(
     """
     Регистрирует или возвращает пользователя с фиксацией источника трафика.
     Возвращает (language, is_new_user, effective_referrer_id).
-    effective_referrer_id будет None, если пользователь уже был в БД или referrer_id невалиден.
+    effective_referrer_id будет не None, если реферер был успешно привязан прямо сейчас
+    (как для новых пользователей, так и для существующих без реферера).
     """
     clean_source = (source or "direct").strip()[:32]
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
-            "SELECT language, source FROM users WHERE user_id = ?", (user_id,)
+            "SELECT language, source, referrer_id FROM users WHERE user_id = ?", (user_id,)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                lang, cur_source = row[0], row[1]
-                # Если источник у существующего пользователя не был задан или был direct, а пришёл конкретный
-                if clean_source != "direct" and (not cur_source or cur_source == "direct"):
+                lang, cur_source, cur_ref = row[0], row[1], row[2]
+                effective_ref = None
+
+                # Если у пользователя ещё нет реферера, а передан валидный referrer_id (не он сам)
+                if cur_ref is None and referrer_id and referrer_id != user_id:
+                    # Проверяем, что реферер существует в базе и не ссылается на текущего пользователя
+                    async with db.execute("SELECT referrer_id FROM users WHERE user_id = ?", (referrer_id,)) as r_cur:
+                        r_row = await r_cur.fetchone()
+                        if r_row and r_row[0] != user_id:
+                            effective_ref = referrer_id
+                            clean_source = "referral"
+
+                if effective_ref:
+                    await db.execute(
+                        """
+                        UPDATE users
+                        SET referrer_id = ?, source = ?, last_active = CURRENT_TIMESTAMP
+                        WHERE user_id = ?
+                        """,
+                        (effective_ref, clean_source, user_id),
+                    )
+                elif clean_source != "direct" and (not cur_source or cur_source == "direct"):
                     await db.execute(
                         "UPDATE users SET source = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?",
                         (clean_source, user_id),
@@ -228,13 +248,14 @@ async def register_or_get_user(
                         (user_id,),
                     )
                 await db.commit()
-                return lang, False, None
+                return lang, False, effective_ref
 
         # Проверяем, что referrer_id существует и не является самим пользователем
         effective_ref = None
         if referrer_id and referrer_id != user_id:
-            async with db.execute("SELECT 1 FROM users WHERE user_id = ?", (referrer_id,)) as r_cur:
-                if await r_cur.fetchone():
+            async with db.execute("SELECT referrer_id FROM users WHERE user_id = ?", (referrer_id,)) as r_cur:
+                r_row = await r_cur.fetchone()
+                if r_row and r_row[0] != user_id:
                     effective_ref = referrer_id
                     if clean_source == "direct":
                         clean_source = "referral"
@@ -248,6 +269,48 @@ async def register_or_get_user(
         )
         await db.commit()
         return fallback_lang, True, effective_ref
+
+
+async def attach_referrer(
+    user_id: int,
+    referrer_id: int,
+    required_referrals: int = 3,
+) -> tuple[bool, str, int, bool]:
+    """
+    Привязывает реферера существующему пользователю вручную.
+    Возвращает (success, status_code, new_count, became_pro).
+    status_code: 'ok', 'self_referral', 'already_has_referrer', 'referrer_not_found', 'circular_referral'
+    """
+    if user_id == referrer_id:
+        return False, "self_referral", 0, False
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        # Проверяем текущего пользователя
+        async with db.execute("SELECT referrer_id FROM users WHERE user_id = ?", (user_id,)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return False, "user_not_found", 0, False
+            if row[0] is not None:
+                return False, "already_has_referrer", 0, False
+
+        # Проверяем целевого реферера
+        async with db.execute("SELECT referrer_id FROM users WHERE user_id = ?", (referrer_id,)) as cur:
+            r_row = await cur.fetchone()
+            if not r_row:
+                return False, "referrer_not_found", 0, False
+            if r_row[0] == user_id:
+                return False, "circular_referral", 0, False
+
+        # Привязываем реферера
+        await db.execute(
+            "UPDATE users SET referrer_id = ?, source = 'referral', last_active = CURRENT_TIMESTAMP WHERE user_id = ?",
+            (referrer_id, user_id),
+        )
+        await db.commit()
+
+    new_count, became_pro = await add_referral_and_check_pro(referrer_id, required_referrals)
+    return True, "ok", new_count, became_pro
+
 
 
 async def add_referral_and_check_pro(

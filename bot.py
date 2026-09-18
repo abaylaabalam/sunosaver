@@ -352,6 +352,7 @@ TEXTS = {
         "stems_fetching": "⏳ <b>Разделяем трек на Вокал и Минус...</b>\nНейросеть Demucs обрабатывает аудио. Это займёт 1–2 минуты, вы можете пока пользоваться ботом!",
         "stems_queued":   "⏳ <b>Вы добавлены в очередь нейросети:</b> #{pos}\nКак только процессор освободится, бот сразу начнёт обработку вашего трека!",
         "stems_limit_reached": "⭐️ <b>Дневной лимит исчерпан!</b>\n\nБесплатным пользователям доступно <b>{limit}</b> разделение в день.\n\nПолучите <b>PRO-безлимит</b> или пригласите друзей по вашей ссылке:\n👉 <code>{ref_url}</code>",
+        "stems_limit_alert": "⭐️ Дневной лимит разделения на стемы исчерпан!",
         "stems_success_vocals": "🎙 <b>Чистый вокал (Акапелла)</b>\n🎵 {title}\n👤 {artist}",
         "stems_success_inst": "🎹 <b>Минусовка (Караоке / Инструментал)</b>\n🎵 {title}\n👤 {artist}",
         "stems_error":    "❌ <b>Не удалось разделить трек.</b>\nПопробуйте ещё раз через пару минут.",
@@ -587,6 +588,7 @@ TEXTS = {
         "stems_fetching": "⏳ <b>Separating into Vocals and Instrumental...</b>\nDemucs AI is processing audio. This takes 1–2 minutes, feel free to use the bot in the meantime!",
         "stems_queued":   "⏳ <b>You are queued in AI processor:</b> #{pos}\nThe bot will start processing your track as soon as CPU frees up!",
         "stems_limit_reached": "⭐️ <b>Daily limit reached!</b>\n\nFree users get <b>{limit}</b> track separation per day.\n\nGet <b>PRO unlimited</b> or invite friends via your link:\n👉 <code>{ref_url}</code>",
+        "stems_limit_alert": "⭐️ Daily stems limit reached!",
         "stems_success_vocals": "🎙 <b>Clean Vocals (Acapella)</b>\n🎵 {title}\n👤 {artist}",
         "stems_success_inst": "🎹 <b>Instrumental (Karaoke)</b>\n🎵 {title}\n👤 {artist}",
         "stems_error":    "❌ <b>Failed to separate track.</b>\nPlease try again in a few minutes.",
@@ -822,6 +824,7 @@ TEXTS = {
         "stems_fetching": "⏳ <b>Ән Вокал мен Минусқа бөлінуде...</b>\nDemucs нейрожелісі өңдеуде. Бұл 1–2 минут алады, ботты пайдалана беруіңізге болады!",
         "stems_queued":   "⏳ <b>Сіз кезекке қосылдыңыз:</b> #{pos}\nПроцессор босаған бойда өңдеу басталады!",
         "stems_limit_reached": "⭐️ <b>Күндізгі лимит таусылды!</b>\n\nТегін қолданушыларға күніне <b>{limit}</b> рет бөлуге рұқсат етілген.\n\nШексіз <b>PRO</b> мәртебесін алыңыз немесе достарыңызды шақырыңыз:\n👉 <code>{ref_url}</code>",
+        "stems_limit_alert": "⭐️ Күндізгі тректі бөлу лимиті аяқталды!",
         "stems_success_vocals": "🎙 <b>Таза вокал (Акапелла)</b>\n🎵 {title}\n👤 {artist}",
         "stems_success_inst": "🎹 <b>Минусовка (Караоке / Аспаптық)</b>\n🎵 {title}\n👤 {artist}",
         "stems_error":    "❌ <b>Әнді бөлу мүмкін болмады.</b>\nБіраздан кейін қайталап көріңіз.",
@@ -2043,8 +2046,8 @@ async def cmd_start(message: types.Message, command: CommandObject):
         user_id, fallback_lang, referrer_id, source=source
     )
 
-    # Если это новый пользователь и у него есть действительный реферер
-    if is_new and effective_ref:
+    # Если реферер действителен и только что привязан
+    if effective_ref:
         new_count, became_pro = await database.add_referral_and_check_pro(
             effective_ref, required_referrals=REFERRALS_FOR_PRO
         )
@@ -2100,18 +2103,72 @@ async def cmd_settings(message: types.Message):
 @dp.message(F.text.in_([t["btn_pro"] for t in TEXTS.values()]))
 @dp.message(Command("pro"))
 @dp.message(Command("ref"))
-async def cmd_pro_referral(message: types.Message):
+async def cmd_pro_referral(message: types.Message, command: CommandObject = None):
     import urllib.parse
     user_id = message.from_user.id
     lang = await database.get_user_language(user_id, get_lang_fallback(message.from_user))
     t = TEXTS[lang]
 
+    # Если передан аргумент в команде (например, /ref 5912303001 или /ref ref_5912303001)
+    if command and command.args:
+        raw = command.args.strip()
+        if raw.startswith("ref_"):
+            raw = raw[4:]
+        if raw.isdigit():
+            target_ref = int(raw)
+            ok, status, new_count, became_pro = await database.attach_referrer(
+                user_id, target_ref, required_referrals=REFERRALS_FOR_PRO
+            )
+            if ok:
+                await message.answer(
+                    f"✅ <b>Пригласивший пользователь успешно привязан!</b> (ID: <code>{target_ref}</code>)\n\n"
+                    f"Спасибо, что поддерживаете друзей! 🤝",
+                    parse_mode="HTML",
+                )
+                ref_lang = await database.get_user_language(target_ref, "ru")
+                ref_t = TEXTS[ref_lang]
+                try:
+                    if became_pro:
+                        await bot.send_message(
+                            chat_id=target_ref,
+                            text=ref_t["ref_pro_unlocked"].format(total=REFERRALS_FOR_PRO),
+                            parse_mode="HTML",
+                        )
+                    else:
+                        remaining = max(0, REFERRALS_FOR_PRO - new_count)
+                        await bot.send_message(
+                            chat_id=target_ref,
+                            text=ref_t["ref_progress"].format(
+                                invited=new_count, total=REFERRALS_FOR_PRO, remaining=remaining
+                            ),
+                            parse_mode="HTML",
+                        )
+                except Exception as e:
+                    logger.warning("Не удалось уведомить реферера %s: %s", target_ref, e)
+                return
+            elif status == "already_has_referrer":
+                await message.answer("ℹ️ У вас уже привязан пригласивший пользователь.", parse_mode="HTML")
+                return
+            elif status == "self_referral":
+                await message.answer("❌ Вы не можете указать свой собственный ID.", parse_mode="HTML")
+                return
+            elif status == "referrer_not_found":
+                await message.answer("❌ Пользователь с таким ID не найден в боте.", parse_mode="HTML")
+                return
+            elif status == "circular_referral":
+                await message.answer("❌ Нельзя указать взаимного реферала.", parse_mode="HTML")
+                return
+
     pro_info = await database.get_user_pro_info(user_id, admin_id=ADMIN_ID, required_referrals=REFERRALS_FOR_PRO)
     ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
 
-    # Быстрый шеринг в Telegram
-    share_text = t["ref_share_text"].format(ref_url=ref_url)
-    share_tg_url = f"https://t.me/share/url?url={urllib.parse.quote(ref_url)}&text={urllib.parse.quote(share_text)}"
+    # Быстрый шеринг в Telegram (передаем чистый текст без дублирования ссылки)
+    share_msg = {
+        "ru": "Скачивай треки с Suno AI в высоком качестве, создавай DJ-миксы и качай студийный WAV через бота! 🎧",
+        "kk": "Suno AI әндерін жоғары сапада жүкте, DJ-микстер жаса және студиялық WAV ал! 🎧",
+        "en": "Download Suno AI tracks in high quality, build DJ mixes and get studio WAV audio via bot! 🎧",
+    }.get(lang, "Скачивай треки с Suno AI в высоком качестве!")
+    share_tg_url = f"https://t.me/share/url?url={urllib.parse.quote(ref_url)}&text={urllib.parse.quote(share_msg)}"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t["btn_share_ref"], url=share_tg_url)],
@@ -4592,7 +4649,7 @@ async def handle_stems_callback(callback: CallbackQuery):
     allowed, _ = await database.check_daily_limit(user_id, "stems", FREE_DAILY_STEMS, is_pro)
     if not allowed:
         ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
-        await callback.answer(t["stems_limit_reached"].format(limit=FREE_DAILY_STEMS, ref_url=ref_url), show_alert=True)
+        await callback.answer(t.get("stems_limit_alert", "⭐️ Дневной лимит исчерпан!"), show_alert=True)
         await callback.message.reply(
             t["stems_limit_reached"].format(limit=FREE_DAILY_STEMS, ref_url=ref_url),
             parse_mode="HTML",
