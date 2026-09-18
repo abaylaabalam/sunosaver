@@ -3,6 +3,7 @@ import html
 import io
 import logging
 import os
+import random
 import re
 import ssl
 import sys
@@ -1348,9 +1349,9 @@ class SubscriptionMiddleware(BaseMiddleware):
         if not REQUIRED_CHANNEL:
             return await handler(event, data)
 
-        # Разрешаем колбэки проверки подписки и выбора языка
+        # Разрешаем колбэки проверки подписки, выбора языка и конкурсов
         if isinstance(event, types.CallbackQuery):
-            if event.data in ("check_sub_again",) or (event.data and event.data.startswith("set_lang:")):
+            if event.data in ("check_sub_again",) or (event.data and event.data.startswith("set_lang:")) or (event.data and event.data.startswith("contest:")):
                 return await handler(event, data)
 
         # Разрешаем команду /start (чтобы зафиксировать реферала и источник трафика)
@@ -2070,6 +2071,7 @@ async def cmd_start(message: types.Message, command: CommandObject):
 
     if is_new:
         asyncio.create_task(check_and_trigger_100_promo())
+        asyncio.create_task(check_and_trigger_1000_contest())
 
     if not await check_user_subscription(user_id):
         await message.answer(TEXTS[lang]["sub_required"], reply_markup=get_sub_keyboard(lang), parse_mode="HTML")
@@ -2270,6 +2272,324 @@ async def cmd_promo100(message: types.Message):
         parse_mode="HTML",
     )
 
+
+# ─── Праздничный конкурс: 1000 пользователей ──────────────────────────────────
+
+CONTEST_1000_TEXTS = {
+    "ru": (
+        "🎉 <b>НАС УЖЕ 1 000 ЧЕЛОВЕК! СПАСИБО, ЧТО ВЫ С НАМИ!</b> ❤️\n\n"
+        "Мы преодолели первую большую вершину — наше сообщество создателей музыки Suno выросло до 1 000 пользователей!\n\n"
+        "🎁 <b>В честь этого юбилея мы объявляем грандиозный розыгрыш:</b>\n"
+        "Мы подарим <b>20 вечных PRO-аккаунтов</b> случайным участникам!\n\n"
+        "💎 <b>Что даёт статус PRO навсегда:</b>\n"
+        "• 🚀 <b>Безлимитное скачивание</b> треков каждый день\n"
+        "• 🎼 Студийное качество звука <b>WAV (HD)</b>\n"
+        "• 🎬 Генерация видеоклипов <b>MP4</b> с анимацией\n"
+        "• 🎛 Сведение треков через <b>DJ Crossfade</b>\n"
+        "• 🎤 Разделение на <b>Stems (вокал / инструментал)</b>\n\n"
+        "👉 <b>Как участвовать:</b>\n"
+        "1. Быть подписанным на наш официальный канал\n"
+        "2. Нажать кнопку <b>«🎉 Участвовать»</b> ниже\n\n"
+        "<i>Итоги подведем уже скоро через генератор случайных чисел. Удачи каждому! 🎧</i>"
+    ),
+    "kk": (
+        "🎉 <b>БІЗ 1 000 АДАМҒА ЖЕТТІК! БІЗБЕН БІРГЕ БОЛҒАНДАРЫҢЫЗҒА РАҚМЕТ!</b> ❤️\n\n"
+        "Біз үлкен межеге жеттік — Suno музыкасын сүйетін қауымдастығымыз 1 000 қолданушыға жетті!\n\n"
+        "🎁 <b>Осы мерейтой құрметіне біз үлкен ұтыс ойынын бастаймыз:</b>\n"
+        "Қатысушылардың арасынан кездейсоқ <b>20 мәңгілік PRO-аккаунт</b> сыйлаймыз!\n\n"
+        "💎 <b>Мәңгілік PRO мәртебесі не береді:</b>\n"
+        "• 🚀 Күн сайын тректерді <b>шектеусіз жүктеу</b>\n"
+        "• 🎼 Студиялық таза <b>WAV (HD)</b> сапасы\n"
+        "• 🎬 Анимациясы бар <b>MP4 видеоклиптер</b>\n"
+        "• 🎛 <b>DJ Crossfade</b> арқылы тректерді микстеу\n"
+        "• 🎤 Тректі <b>Stems (вокал / минус)</b> бөліктеріне бөлу\n\n"
+        "👉 <b>Қалай қатысуға болады:</b>\n"
+        "1. Біздің ресми арнамызға жазылу\n"
+        "2. Төмендегі <b>«🎉 Қатысу»</b> батырмасын басу\n\n"
+        "<i>Жеңімпаздар жақында кездейсоқ таңдау арқылы анықталады. Баршаңызға сәттілік! 🎧</i>"
+    ),
+    "en": (
+        "🎉 <b>WE HIT 1,000 USERS! THANK YOU FOR BEING WITH US!</b> ❤️\n\n"
+        "We have reached our first major milestone — our community of Suno music creators has grown to 1,000 users!\n\n"
+        "🎁 <b>To celebrate this milestone, we're giving away 20 Lifetime PRO Accounts!</b>\n\n"
+        "💎 <b>What Lifetime PRO gives you:</b>\n"
+        "• 🚀 <b>Unlimited</b> daily track downloads\n"
+        "• 🎼 Studio-grade <b>WAV (HD)</b> audio\n"
+        "• 🎬 Visualized <b>MP4 video clips</b>\n"
+        "• 🎛 <b>DJ Crossfade</b> track mixing\n"
+        "• 🎤 <b>Stems separation</b> (vocals / instrumental)\n\n"
+        "👉 <b>How to participate:</b>\n"
+        "1. Subscribe to our official channel\n"
+        "2. Click the <b>«🎉 Enter Giveaway»</b> button below\n\n"
+        "<i>Winners will be selected randomly soon. Best of luck to everyone! 🎧</i>"
+    ),
+}
+
+WINNER_1000_TEXTS = {
+    "ru": (
+        "🎉 <b>ПОЗДРАВЛЯЕМ! ВЫ ВЫИГРАЛИ PRO-АККАУНТ!</b> 🏆\n\n"
+        "Вы стали одним из 20 счастливчиков в нашем юбилейном розыгрыше в честь 1 000 пользователей!\n\n"
+        "⭐️ Вам навсегда присвоен статус <b>PRO</b>:\n"
+        "• 🚀 <b>Безлимитное скачивание</b> треков каждый день\n"
+        "• 🎼 Чистый студийный звук <b>WAV (HD)</b>\n"
+        "• 🎬 Генерация видеоклипов <b>MP4</b> с анимацией\n"
+        "• 🎛 <b>DJ Crossfade</b> миксы до 10 треков\n"
+        "• 🎤 Разделение на <b>Stems (вокал / инструментал)</b>\n\n"
+        "Спасибо за участие и творчество с нами! 🎧❤️"
+    ),
+    "kk": (
+        "🎉 <b>ҚҰТТЫҚТАЙМЫЗ! СІЗ PRO-АККАУНТ ҰТЫП АЛДЫҢЫЗ!</b> 🏆\n\n"
+        "Сіз 1 000 қолданушыға арналған мерейтойлық ұтыс ойынындағы 20 жеңімпаздың бірі атандыңыз!\n\n"
+        "⭐️ Сізге мәңгілік <b>PRO</b> мәртебесі берілді:\n"
+        "• 🚀 Күн сайын тректерді <b>шектеусіз жүктеу</b>\n"
+        "• 🎼 <b>WAV (HD)</b> студиялық таза дыбыс\n"
+        "• 🎬 Анимациясы бар <b>MP4 видеоклиптер</b>\n"
+        "• 🎛 <b>DJ Crossfade</b> арқылы 10 әнге дейін микстеу\n"
+        "• 🎤 Тректі <b>Stems (вокал / минус)</b> бөліктеріне бөлу\n\n"
+        "Бізбен бірге болғаныңыз үшін рақмет! 🎧❤️"
+    ),
+    "en": (
+        "🎉 <b>CONGRATULATIONS! YOU WON A PRO ACCOUNT!</b> 🏆\n\n"
+        "You are one of the 20 lucky winners of our 1,000 users milestone giveaway!\n\n"
+        "⭐️ You have been granted lifetime <b>PRO</b> status:\n"
+        "• 🚀 <b>Unlimited</b> daily track downloads\n"
+        "• 🎼 Studio-grade <b>WAV (HD)</b> lossless audio\n"
+        "• 🎬 Visualized <b>MP4 video clips</b>\n"
+        "• 🎛 <b>DJ Crossfade</b> mix builder up to 10 tracks\n"
+        "• 🎤 <b>Stems separation</b> (vocals / instrumental)\n\n"
+        "Thank you for being part of our community! 🎧❤️"
+    ),
+}
+
+
+def get_contest_1000_keyboard(count: int = 0, lang: str = "ru") -> InlineKeyboardMarkup:
+    if lang == "kk":
+        btn_participate = f"🎉 Қатысу ({count})" if count > 0 else "🎉 Қатысу"
+        btn_channel = "📢 Біздің арна"
+    elif lang == "en":
+        btn_participate = f"🎉 Enter Giveaway ({count})" if count > 0 else "🎉 Enter Giveaway"
+        btn_channel = "📢 Our Channel"
+    else:
+        btn_participate = f"🎉 Участвовать ({count})" if count > 0 else "🎉 Участвовать"
+        btn_channel = "📢 Наш канал"
+
+    rows = [
+        [InlineKeyboardButton(text=btn_participate, callback_data="contest:join:1000users")],
+    ]
+    if CHANNEL_URL:
+        rows.append([InlineKeyboardButton(text=btn_channel, url=CHANNEL_URL)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+_contest_1000_lock = asyncio.Lock()
+
+
+async def check_and_trigger_1000_contest(force: bool = False) -> tuple[bool, int]:
+    """
+    Проверяет, достигнута ли отметка в 1000 пользователей, и если да —
+    запускает праздничную рассылку розыгрыша 20 PRO-аккаунтов по всем пользователям.
+    Возвращает (was_triggered, sent_count).
+    """
+    async with _contest_1000_lock:
+        if not force and await database.is_contest_1000_broadcasted():
+            return False, 0
+
+        total_users = await database.get_total_users_count()
+        if not force and total_users < 1000:
+            return False, 0
+
+        logger.info("🎉 Достигнута отметка 1000 пользователей! Запуск юбилейного розыгрыша...")
+        await database.mark_contest_1000_broadcasted()
+
+        users = await database.get_all_users_with_lang()
+        sent_count = 0
+
+        for uid, lang in users:
+            msg_text = CONTEST_1000_TEXTS.get(lang, CONTEST_1000_TEXTS["ru"])
+            kb = get_contest_1000_keyboard(0, lang)
+            try:
+                await bot.send_message(chat_id=uid, text=msg_text, reply_markup=kb, parse_mode="HTML")
+                sent_count += 1
+                await asyncio.sleep(0.05)  # не спамим Telegram API
+            except TelegramForbiddenError:
+                pass
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after)
+                try:
+                    await bot.send_message(chat_id=uid, text=msg_text, reply_markup=kb, parse_mode="HTML")
+                    sent_count += 1
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning("Ошибка отправки сообщения конкурса 1000 пользователю %s: %s", uid, e)
+
+        # Уведомляем администратора
+        if ADMIN_ID:
+            try:
+                await bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"🎉 <b>Событие: Нас 1 000 пользователей!</b>\n\n"
+                        f"🚀 Юбилейный розыгрыш 20 вечных PRO запущен!\n"
+                        f"📩 Рассылка доставлена: <b>{sent_count} / {len(users)}</b> пользователям.\n\n"
+                        f"<i>Для подведения итогов используйте команду:</i> <code>/finish_contest1000</code>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error("Не удалось уведомить админа о 1000 пользователях: %s", e)
+
+        return True, sent_count
+
+
+@dp.callback_query(F.data == "contest:join:1000users")
+async def callback_contest_join(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+
+    # 1. Проверяем подписку на обязательный канал
+    is_sub = await check_user_subscription(user_id)
+    if not is_sub:
+        msg = {
+            "ru": "⚠️ Для участия в розыгрыше подпишитесь на наш канал @youtubestantg, затем нажмите «Участвовать» снова!",
+            "kk": "⚠️ Ұтысқа қатысу үшін біздің @youtubestantg арнасына жазылып, содан кейін «Қатысу» батырмасын қайта басыңыз!",
+            "en": "⚠️ To enter the giveaway, please subscribe to @youtubestantg, then click 'Enter Giveaway' again!",
+        }.get(lang, "⚠️ Для участия в розыгрыше необходимо подписаться на наш канал!")
+        await callback.answer(msg, show_alert=True)
+        return
+
+    # 2. Проверяем, участвует ли уже
+    if await database.is_contest_participant("1000users", user_id):
+        msg = {
+            "ru": "✅ Вы уже зарегистрированы в розыгрыше 20 PRO! Итоги подведем скоро. Удачи! 🍀",
+            "kk": "✅ Сіз 20 PRO ұтысына тіркеліп қойғансыз! Нәтижелер жақында жарияланады. Сәттілік! 🍀",
+            "en": "✅ You are already registered for the 20 PRO giveaway! Results announced soon. Good luck! 🍀",
+        }.get(lang, "✅ Вы уже зарегистрированы в розыгрыше!")
+        await callback.answer(msg, show_alert=True)
+        return
+
+    # 3. Добавляем в участники конкурса
+    joined = await database.join_contest("1000users", user_id)
+    if joined:
+        count = await database.get_contest_participants_count("1000users")
+        msg = {
+            "ru": "🎉 Поздравляем! Вы успешно зарегистрированы в розыгрыше 20 вечных PRO! Желаем удачи! 🍀",
+            "kk": "🎉 Құттықтаймыз! Сіз 20 мәңгілік PRO ұтысына сәтті тіркелдіңіз! Сәттілік тілейміз! 🍀",
+            "en": "🎉 Congratulations! You have successfully entered the 20 Lifetime PRO giveaway! Good luck! 🍀",
+        }.get(lang, "🎉 Вы успешно зарегистрированы в розыгрыше!")
+        await callback.answer(msg, show_alert=True)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=get_contest_1000_keyboard(count, lang))
+        except Exception:
+            pass
+    else:
+        await callback.answer("✅ Вы уже участвуете в розыгрыше!", show_alert=True)
+
+
+@dp.message(Command("contest1000"))
+async def cmd_contest1000(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    force = len(parts) > 1 and parts[1].lower() in ("force", "run", "now")
+
+    is_broadcasted = await database.is_contest_1000_broadcasted()
+    is_finished = await database.is_contest_1000_finished()
+    total_users = await database.get_total_users_count()
+    participants_count = await database.get_contest_participants_count("1000users")
+
+    if not force:
+        if is_finished:
+            status_str = "🏆 Итоги подведены (завершён)"
+        elif is_broadcasted:
+            status_str = f"🔥 Рассылка проведена (идёт сбор заявок, {participants_count} уч.)"
+        else:
+            status_str = f"⏳ Ожидает ({total_users}/1000 пользователей)"
+
+        await message.answer(
+            f"🎁 <b>Конкурс «1000 пользователей — 20 PRO навсегда»:</b>\n\n"
+            f"• Статус: <b>{status_str}</b>\n"
+            f"• Всего пользователей в базе: <b>{total_users}</b>\n"
+            f"• Участников конкурса: <b>{participants_count}</b>\n\n"
+            f"<i>Команды:</i>\n"
+            f"• <code>/contest1000 force</code> — принудительно запустить рассылку конкурса\n"
+            f"• <code>/finish_contest1000</code> — подвести итоги (выбрать 20 случайных победителей, выдать PRO и уведомить их)",
+            parse_mode="HTML",
+        )
+        return
+
+    await message.answer("⏳ Запускаю юбилейную рассылку конкурса по всем пользователям...", parse_mode="HTML")
+    triggered, sent_count = await check_and_trigger_1000_contest(force=True)
+    await message.answer(
+        f"✅ <b>Рассылка конкурса завершена!</b>\n\n"
+        f"📩 Доставлено: <b>{sent_count}</b> пользователям.",
+        parse_mode="HTML",
+    )
+
+
+@dp.message(Command("finish_contest1000"))
+async def cmd_finish_contest1000(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    force = len(parts) > 1 and parts[1].lower() in ("force", "run", "now")
+
+    if not force and await database.is_contest_1000_finished():
+        await message.answer(
+            "⚠️ <b>Итоги конкурса уже подводились!</b>\n\n"
+            "Если вы уверены, что хотите запустить повторный выбор победителей:\n"
+            "<code>/finish_contest1000 force</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    participants = await database.get_contest_participants("1000users")
+    if not participants:
+        await message.answer("❌ Участников в конкурсе пока нет.", parse_mode="HTML")
+        return
+
+    k = min(20, len(participants))
+    await message.answer(
+        f"🎲 <b>Подведение итогов конкурса:</b>\n"
+        f"Всего участников: <b>{len(participants)}</b>\n"
+        f"Выбираю {k} победителей...",
+        parse_mode="HTML",
+    )
+
+    winners = random.sample(participants, k)
+    await database.mark_contest_1000_finished()
+
+    notified_count = 0
+    winner_lines = []
+
+    for idx, uid in enumerate(winners, 1):
+        await database.set_user_pro(uid, True)
+        u_lang = await database.get_user_language(uid, "ru")
+        w_text = WINNER_1000_TEXTS.get(u_lang, WINNER_1000_TEXTS["ru"])
+        sent_ok = False
+        try:
+            await bot.send_message(chat_id=uid, text=w_text, parse_mode="HTML")
+            sent_ok = True
+            notified_count += 1
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.warning("Не удалось уведомить победителя %s: %s", uid, e)
+
+        status_emoji = "✅" if sent_ok else "⚠️ (ЛС недоступны)"
+        winner_lines.append(f"{idx}. ID: <code>{uid}</code> {status_emoji}")
+
+    winners_list_str = "\n".join(winner_lines)
+    await message.answer(
+        f"🏆 <b>Итоги конкурса «1000 пользователей» подведены!</b>\n\n"
+        f"👥 Всего участников: <b>{len(participants)}</b>\n"
+        f"⭐️ Выбрано победителей: <b>{len(winners)}</b>\n"
+        f"📩 Уведомлено в ЛС: <b>{notified_count}</b>\n\n"
+        f"<b>Победители (выдан вечный PRO):</b>\n{winners_list_str}",
+        parse_mode="HTML",
+    )
+
 @dp.message(Command("admin"))
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
@@ -2312,6 +2632,17 @@ async def cmd_stats(message: types.Message):
     top_srcs = [f"{src_map.get(item['source'], item['source'])}: {item['count']}" for item in s.get("sources", [])[:4]]
     srcs_line = " | ".join(top_srcs) if top_srcs else "—"
 
+    # Конкурс 1000
+    contest_count = await database.get_contest_participants_count("1000users")
+    contest_broadcasted = await database.is_contest_1000_broadcasted()
+    contest_finished = await database.is_contest_1000_finished()
+    contest_line = ""
+    if contest_broadcasted:
+        c_status = "🏆 Завершён" if contest_finished else "🔥 Идёт сбор"
+        contest_line = f"• Конкурс 1000: <b>{contest_count}</b> уч. ({c_status})\n"
+    elif total_users >= 950:
+        contest_line = f"• Конкурс 1000: ⏳ Ожидает ({total_users}/1000)\n"
+
     text = (
         f"📊 <b>Статистика SunoSaver</b>\n\n"
         f"{channel_line}"
@@ -2319,6 +2650,7 @@ async def cmd_stats(message: types.Message):
         f"• Всего: <b>{total_users:,}</b> (+{s['new_users_24h']:,} за 24ч)\n"
         f"• Реальных: <b>{real_users:,}</b> ({real_pct}%) | PRO: <b>{s['pro_users']:,}</b>\n"
         f"• Активных: <b>{s['active_users_today']:,}</b> сег. | <b>{s['active_users_7d']:,}</b> за 7д\n"
+        f"{contest_line}"
         f"• Языки: {langs_line}\n"
         f"• Источники: {srcs_line}\n\n"
         f"⚡️ <b>Сегодня:</b>\n"
@@ -3737,6 +4069,7 @@ async def handle_wav_callback(callback: CallbackQuery):
     cached_track = await database.get_cached_track(song_id)
     title = cached_track[1] if cached_track and cached_track[1] else "Suno Track"
     safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
+    escaped_title = html.escape(safe_title)
     custom_artist = await database.get_user_custom_artist(user_id)
     cached_artist = cached_track[3] if cached_track and len(cached_track) > 3 and cached_track[3] else None
     artist = custom_artist or cached_artist or "Suno AI (@sunosaver_bot)"

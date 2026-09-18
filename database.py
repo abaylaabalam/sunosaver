@@ -107,6 +107,16 @@ async def init_db():
             )
         """)
 
+        # Таблица участников конкурсов
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS contest_participants (
+                contest_id TEXT NOT NULL,
+                user_id    INTEGER NOT NULL,
+                joined_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (contest_id, user_id)
+            )
+        """)
+
         # Миграция: добавляем новые колонки в users и track_cache для существующих БД
         for sql in [
             "ALTER TABLE track_cache ADD COLUMN download_count INTEGER DEFAULT 1",
@@ -1003,3 +1013,92 @@ async def get_first_n_users_with_lang(n: int = 100) -> list[tuple[int, str]]:
             (n,),
         ) as cursor:
             return await cursor.fetchall()
+
+
+async def get_all_users_with_lang() -> list[tuple[int, str]]:
+    """Возвращает [(user_id, language), ...] для всех пользователей."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            """
+            SELECT user_id, COALESCE(language, 'ru')
+            FROM users
+            ORDER BY created_at ASC
+            """
+        ) as cursor:
+            return await cursor.fetchall()
+
+
+async def set_user_pro(user_id: int, is_pro: bool = True):
+    """Выдает или снимает статус PRO у пользователя."""
+    val = 1 if is_pro else 0
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET is_pro = ? WHERE user_id = ?", (val, user_id))
+        await db.commit()
+
+
+async def join_contest(contest_id: str, user_id: int) -> bool:
+    """Добавляет пользователя в участники конкурса. Возвращает True, если добавлен впервые, False если уже участвует."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        try:
+            await db.execute(
+                "INSERT INTO contest_participants (contest_id, user_id) VALUES (?, ?)",
+                (contest_id, user_id),
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+
+async def is_contest_participant(contest_id: str, user_id: int) -> bool:
+    """Проверяет, зарегистрирован ли пользователь в конкурсе."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT 1 FROM contest_participants WHERE contest_id = ? AND user_id = ?",
+            (contest_id, user_id),
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+
+async def get_contest_participants_count(contest_id: str) -> int:
+    """Возвращает количество участников конкурса."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM contest_participants WHERE contest_id = ?",
+            (contest_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def get_contest_participants(contest_id: str) -> list[int]:
+    """Возвращает список user_id участников конкурса."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT user_id FROM contest_participants WHERE contest_id = ? ORDER BY joined_at ASC",
+            (contest_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows]
+
+
+async def is_contest_1000_broadcasted() -> bool:
+    """Проверяет, была ли уже отправлена рассылка конкурса 1000 пользователей."""
+    val = await get_setting("contest_1000_broadcasted")
+    return val == "1"
+
+
+async def mark_contest_1000_broadcasted():
+    """Отмечает, что рассылка конкурса 1000 пользователей отправлена."""
+    await set_setting("contest_1000_broadcasted", "1")
+
+
+async def is_contest_1000_finished() -> bool:
+    """Проверяет, были ли уже подведены итоги конкурса 1000 пользователей."""
+    val = await get_setting("contest_1000_finished")
+    return val == "1"
+
+
+async def mark_contest_1000_finished():
+    """Отмечает, что итоги конкурса 1000 пользователей подведены."""
+    await set_setting("contest_1000_finished", "1")
