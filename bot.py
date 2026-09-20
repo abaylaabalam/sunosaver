@@ -5,11 +5,13 @@ import logging
 import os
 import random
 import re
+import sqlite3
 import ssl
 import sys
 import tempfile
 import time
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -2861,6 +2863,41 @@ async def cmd_broadcast(message: types.Message):
     logger.info("Рассылка завершена: sent=%s, blocked=%s, failed=%s, duration=%.1fs", sent, blocked, failed, duration)
 
 
+def create_db_backup_archive(source_db_path: str) -> tuple[str, str, int, int]:
+    """
+    Создает целостный и сжатый ZIP-архив базы данных через SQLite Online Backup API.
+    Возвращает (archive_path, archive_filename, orig_size_bytes, zip_size_bytes).
+    """
+    orig_size = os.path.getsize(source_db_path) if os.path.exists(source_db_path) else 0
+    now_tag = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    archive_filename = f"backup_bot_data_{now_tag}.zip"
+
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
+        archive_path = tf.name
+
+    # Создаем безопасный горячий snapshot базы SQLite (не блокирует пишущие транзакции)
+    temp_db_path = archive_path + ".tmp.db"
+    try:
+        src_conn = sqlite3.connect(source_db_path)
+        dst_conn = sqlite3.connect(temp_db_path)
+        with dst_conn:
+            src_conn.backup(dst_conn)
+        dst_conn.close()
+        src_conn.close()
+
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            zf.write(temp_db_path, arcname=f"bot_data_{now_tag}.db")
+    finally:
+        if os.path.exists(temp_db_path):
+            try:
+                os.remove(temp_db_path)
+            except Exception:
+                pass
+
+    zip_size = os.path.getsize(archive_path)
+    return archive_path, archive_filename, orig_size, zip_size
+
+
 @dp.message(Command("backup"))
 async def cmd_backup(message: types.Message):
     if not is_admin(message.from_user.id):
@@ -2871,37 +2908,83 @@ async def cmd_backup(message: types.Message):
         await message.answer("❌ Файл базы данных не найден.")
         return
 
-    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    filename = f"backup_bot_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"
-    db_file = FSInputFile(db_path, filename=filename)
+    wait_msg = await message.answer("⏳ Создаю сжатый бэкап базы данных...")
+    archive_path = None
+    try:
+        archive_path, filename, orig_size, zip_size = await asyncio.to_thread(
+            create_db_backup_archive, db_path
+        )
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        orig_mb = orig_size / (1024 * 1024)
+        zip_mb = zip_size / (1024 * 1024)
+        ratio = int((1 - zip_size / orig_size) * 100) if orig_size > 0 else 0
 
-    await message.answer_document(
-        document=db_file,
-        caption=f"💾 <b>Резервная копия базы данных</b>\n📅 <code>{now_str}</code>\n⚡️ @sunosaver_bot",
-        parse_mode="HTML"
-    )
+        caption = (
+            f"💾 <b>Резервная копия базы данных</b>\n"
+            f"📅 <code>{now_str}</code>\n"
+            f"📦 Размер архива: <b>{zip_mb:.1f} МБ</b> <i>(исходный: {orig_mb:.1f} МБ, сжатие {ratio}%)</i>\n"
+            f"⚡️ @sunosaver_bot"
+        )
+        db_file = FSInputFile(archive_path, filename=filename)
+        await message.answer_document(
+            document=db_file,
+            caption=caption,
+            parse_mode="HTML",
+        )
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error("Ошибка создания бэкапа: %s", e, exc_info=True)
+        await message.answer(f"❌ Ошибка создания бэкапа: {e}")
+    finally:
+        if archive_path and os.path.exists(archive_path):
+            try:
+                os.remove(archive_path)
+            except Exception:
+                pass
 
 
 async def periodic_db_backup():
-    """Фоновая задача: каждые 24 часа отправляет бэкап базы данных администратору."""
+    """Фоновая задача: каждые 24 часа отправляет сжатый ZIP-бэкап базы данных администратору."""
     while True:
         await asyncio.sleep(24 * 3600)
+        archive_path = None
         try:
             db_path = database.DB_NAME
             if ADMIN_ID and os.path.exists(db_path):
+                archive_path, filename, orig_size, zip_size = await asyncio.to_thread(
+                    create_db_backup_archive, db_path
+                )
                 now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-                filename = f"backup_bot_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"
-                db_file = FSInputFile(db_path, filename=filename)
+                orig_mb = orig_size / (1024 * 1024)
+                zip_mb = zip_size / (1024 * 1024)
+                ratio = int((1 - zip_size / orig_size) * 100) if orig_size > 0 else 0
+
+                caption = (
+                    f"💾 <b>Автоматический бэкап базы данных (24ч)</b>\n"
+                    f"📅 <code>{now_str}</code>\n"
+                    f"📦 Размер: <b>{zip_mb:.1f} МБ</b> <i>(исходный: {orig_mb:.1f} МБ, сжатие {ratio}%)</i>\n"
+                    f"⚡️ @sunosaver_bot"
+                )
+                db_file = FSInputFile(archive_path, filename=filename)
                 await bot.send_document(
                     chat_id=ADMIN_ID,
                     document=db_file,
-                    caption=f"💾 <b>Автоматический бэкап базы данных (24ч)</b>\n📅 <code>{now_str}</code>\n⚡️ @sunosaver_bot",
-                    parse_mode="HTML"
+                    caption=caption,
+                    parse_mode="HTML",
                 )
-                logger.info("Автобэкап базы данных отправлен админу %s", ADMIN_ID)
+                logger.info("Автобэкап базы данных (%.1f МБ -> %.1f МБ) отправлен админу %s", orig_mb, zip_mb, ADMIN_ID)
         except Exception as e:
             logger.error("Ошибка автобэкапа базы данных: %s", e, exc_info=True)
             await notify_admin_error("periodic_db_backup", e)
+        finally:
+            if archive_path and os.path.exists(archive_path):
+                try:
+                    os.remove(archive_path)
+                except Exception:
+                    pass
 
 
 # ─── Кнопки меню ───────────────────────────────────────────────────────────────
