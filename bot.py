@@ -23,7 +23,13 @@ from typing import Callable, Dict, Any, Awaitable
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.types import TelegramObject
 from aiogram.filters import CommandStart, Command, CommandObject
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter, TelegramAPIError, TelegramEntityTooLarge
+from aiogram.exceptions import (
+    TelegramForbiddenError,
+    TelegramRetryAfter,
+    TelegramAPIError,
+    TelegramEntityTooLarge,
+    TelegramBadRequest,
+)
 from aiogram.types import (
     BufferedInputFile,
     FSInputFile,
@@ -187,7 +193,8 @@ async def send_audio_safe(chat_id: int, message: types.Message | None = None, **
             try:
                 return await message.reply_audio(**kwargs)
             except Exception as e:
-                if "message to be replied not found" in str(e).lower():
+                err_lower = str(e).lower()
+                if "message to be replied not found" in err_lower or "reply message not found" in err_lower:
                     logger.warning("Целевое сообщение для reply_audio не найдено, отправка через send_audio: %s", e)
                 else:
                     raise
@@ -215,7 +222,8 @@ async def send_video_safe(chat_id: int, message: types.Message | None = None, **
             try:
                 return await message.reply_video(**kwargs)
             except Exception as e:
-                if "message to be replied not found" in str(e).lower():
+                err_lower = str(e).lower()
+                if "message to be replied not found" in err_lower or "reply message not found" in err_lower:
                     logger.warning("Целевое сообщение для reply_video не найдено, отправка через send_video: %s", e)
                 else:
                     raise
@@ -1038,7 +1046,7 @@ def make_suno_url(song_id: str) -> str:
 
 
 def is_valid_mp3(data: bytes) -> bool:
-    if len(data) < 50 * 1024:          # < 50 КБ
+    if len(data) < 1000:               # < 1 КБ (отсекаем пустые ответы/ошибки сети)
         return False
     if len(data) > 50 * 1024 * 1024:   # > 50 МБ (лимит Bot API)
         return False
@@ -1530,7 +1538,17 @@ async def download_direct_from_suno(
                 await asyncio.sleep(1.0)
 
         # Извлекаем UUID песни
-        uuid = extract_song_id(final_url) or extract_song_id(suno_url)
+        cand_id = extract_song_id(final_url)
+        if cand_id and UUID_PATTERN.match(cand_id):
+            uuid = cand_id
+        if not uuid and html_text:
+            canonical_m = re.search(r'suno\.com/song/([0-9a-fA-F-]{36})', html_text)
+            if canonical_m:
+                uuid = canonical_m.group(1)
+        if not uuid:
+            cand_id = extract_song_id(suno_url)
+            if cand_id and UUID_PATTERN.match(cand_id):
+                uuid = cand_id
         if (not uuid or not UUID_PATTERN.match(uuid)) and html_text:
             uuid_m = UUID_PATTERN.search(html_text)
             if uuid_m:
