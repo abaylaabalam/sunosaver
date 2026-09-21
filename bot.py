@@ -1267,6 +1267,7 @@ def get_stars_donate_keyboard(lang: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⭐️ 250", callback_data="donate_star:250"),
         ],
         [InlineKeyboardButton(text=t["btn_custom_stars"], callback_data="donate_star:custom")],
+        [InlineKeyboardButton(text=t["btn_donate_tribute"], url=TRIBUTE_URL)],
         [InlineKeyboardButton(text=t["mix_btn_back"], callback_data="donate:back")],
     ])
 
@@ -1852,7 +1853,7 @@ async def _download_and_send(
             logger.info("Из кэша: %s", song_id)
             try:
                 user_dl = await database.get_user_downloads_count(effective_user_id)
-                show_donate = ((user_dl + 1) % 5 == 0)
+                show_donate = ((user_dl + 1) % 3 == 0)
                 reply_markup = get_track_inline_keyboard(lang, song_id, show_donate=show_donate)
                 try:
                     await message.answer_audio(
@@ -1965,7 +1966,7 @@ async def _download_and_send(
         thumb_file     = BufferedInputFile(image_bytes, filename="cover.jpg") if image_bytes else None
         caption        = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {escaped_artist}"
         user_dl        = await database.get_user_downloads_count(effective_user_id)
-        show_donate    = ((user_dl + 1) % 5 == 0)
+        show_donate    = ((user_dl + 1) % 3 == 0)
         reply_markup   = get_track_inline_keyboard(lang, song_id, show_donate=show_donate)
 
         # ── Отправка ──────────────────────────────────────────────────────────
