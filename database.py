@@ -479,7 +479,7 @@ async def get_top_donators(limit: int = 5) -> list[dict]:
             """
             SELECT username, SUM(amount) as total_amount
             FROM donations
-            GROUP BY user_id
+            GROUP BY CASE WHEN user_id != 0 THEN user_id ELSE username END
             ORDER BY total_amount DESC
             LIMIT ?
             """,
