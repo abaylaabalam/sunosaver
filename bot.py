@@ -2596,6 +2596,52 @@ async def callback_contest_join(callback: types.CallbackQuery):
         await callback.answer("✅ Вы уже участвуете в розыгрыше!", show_alert=True)
 
 
+@dp.callback_query(F.data.startswith("poll:sub:"))
+async def callback_poll_subscription(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    vote = callback.data.split(":")[-1]  # "yes" or "no"
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+
+    await database.record_poll_vote(user_id, "sub_micro", vote)
+
+    if vote == "yes":
+        msg = {
+            "ru": "❤️ Спасибо огромное за поддержку! Ваш голос очень важен для будущего проекта! Мы сделаем всё возможное, чтобы радовать вас новыми функциями.",
+            "kk": "❤️ Қолдауыңызға мың алғыс! Сіздің дауысыңыз жобаның болашағы үшін өте маңызды! Сіздер үшін жаңа мүмкіндіктерді дамыта береміз.",
+            "en": "❤️ Thank you so much for your support! Your vote means the world to our project! We will keep making SunoSaver even better for you.",
+        }.get(lang, "❤️ Спасибо за ваш голос!")
+    else:
+        msg = {
+            "ru": "👍 Спасибо за честный ответ! Мы ценим ваше мнение и будем искать другие способы поддержания серверов.",
+            "kk": "👍 Ашық жауабыңызға рақмет! Пікіріңіз біз үшін маңызды, серверлерді ұстап тұрудың басқа жолдарын іздейміз.",
+            "en": "👍 Thank you for your honest feedback! We truly value your opinion and will explore alternative solutions.",
+        }.get(lang, "👍 Спасибо за ваш голос!")
+
+    await callback.answer(msg, show_alert=True)
+
+
+@dp.message(Command("poll_stats"))
+async def cmd_poll_stats(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    stats = await database.get_poll_results("sub_micro")
+    yes_count = stats.get("yes", 0)
+    no_count = stats.get("no", 0)
+    total = stats.get("total", 0)
+
+    yes_pct = round((yes_count / total * 100), 1) if total > 0 else 0
+    no_pct = round((no_count / total * 100), 1) if total > 0 else 0
+
+    text = (
+        f"📊 <b>Результаты опроса по микро-подписке ($1–$2):</b>\n\n"
+        f"👍 <b>Да, готов поддержать:</b> {yes_count} ({yes_pct}%)\n"
+        f"👎 <b>Нет, оставить бесплатно:</b> {no_count} ({no_pct}%)\n"
+        f"👥 <b>Всего голосов:</b> {total}\n"
+    )
+    await message.reply(text, parse_mode="HTML")
+
+
 @dp.message(Command("contest1000"))
 async def cmd_contest1000(message: types.Message):
     if not is_admin(message.from_user.id):

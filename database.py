@@ -117,6 +117,17 @@ async def init_db():
             )
         """)
 
+        # Опросы / Голосование
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS poll_votes (
+                user_id    INTEGER,
+                poll_id    TEXT,
+                vote       TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, poll_id)
+            )
+        """)
+
         # Миграция: добавляем новые колонки в users и track_cache для существующих БД
         for sql in [
             "ALTER TABLE track_cache ADD COLUMN download_count INTEGER DEFAULT 1",
@@ -1250,3 +1261,27 @@ async def is_contest_1000_finished() -> bool:
 async def mark_contest_1000_finished():
     """Отмечает, что итоги конкурса 1000 пользователей подведены."""
     await set_setting("contest_1000_finished", "1")
+
+
+async def record_poll_vote(user_id: int, poll_id: str, vote: str) -> bool:
+    """Записывает голос в опрос (или обновляет при повторном нажатии)."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("""
+            INSERT INTO poll_votes (user_id, poll_id, vote, created_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, poll_id) DO UPDATE SET vote = excluded.vote, created_at = CURRENT_TIMESTAMP
+        """, (user_id, poll_id, vote))
+        await db.commit()
+        return True
+
+
+async def get_poll_results(poll_id: str = "sub_micro") -> dict:
+    """Возвращает статистику голосов опроса: {'yes': count, 'no': count, 'total': count}."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("""
+            SELECT vote, COUNT(*) FROM poll_votes WHERE poll_id = ? GROUP BY vote
+        """, (poll_id,)) as cursor:
+            rows = await cursor.fetchall()
+            results = {row[0]: row[1] for row in rows}
+            results["total"] = sum(results.values())
+            return results

@@ -13,11 +13,13 @@ if [ -z "$KEY_FILE" ]; then
 fi
 
 echo "📤 Загружаю файлы на ${SERVER_IP}..."
-scp -i "$KEY_FILE" \
+scp -r -i "$KEY_FILE" \
     "$BOT_DIR/bot.py" \
     "$BOT_DIR/database.py" \
     "$BOT_DIR/requirements.txt" \
     "$BOT_DIR/.env" \
+    "$BOT_DIR/run_threads_poster.py" \
+    "$BOT_DIR/threads_poster" \
     "$REMOTE_DIR"
 
 if [ $? -eq 0 ]; then
