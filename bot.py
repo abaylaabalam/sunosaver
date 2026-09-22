@@ -1524,7 +1524,7 @@ async def periodic_cache_cleanup():
 async def download_direct_from_suno(
     suno_url: str,
     session:  aiohttp.ClientSession,
-) -> tuple[bytes | None, str, str | None, str | None]:
+) -> tuple[bytes | None, str, str | None, str | None, str | None, bytes | None, str | None]:
     """Скачивает аудио напрямую из CDN Suno и конвертирует через ffmpeg.
     1. Если есть видео MP4 — извлекает аудио напрямую.
     2. Если видео нет — запрашивает права гостя у studio-api, расшифровывает
@@ -1580,7 +1580,7 @@ async def download_direct_from_suno(
 
         if not uuid:
             logger.warning("Не удалось извлечь UUID из страницы Suno: %s", final_url)
-            return None, "Suno Track", None, None
+            return None, "Suno Track", None, None, None, None, None
 
         # Извлекаем название трека
         title = "Suno Track"
