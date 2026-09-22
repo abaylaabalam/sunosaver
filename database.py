@@ -1011,6 +1011,91 @@ async def get_user_recent_tracks(user_id: int, limit: int = 10, offset: int = 0)
             return [(r[0], r[1] or "Suno Track") for r in rows]
 
 
+async def search_cached_tracks(user_id: int | None, query: str = "", limit: int = 20) -> list[dict]:
+    """Поиск треков для инлайн-режима:
+    - Если query задан: ищет в track_cache по title и artist.
+    - Если query пустой: возвращает недавние треки пользователя из user_tracks,
+      а если их мало — дополняет популярными треками из track_cache."""
+    clean_q = query.strip()
+    async with aiosqlite.connect(DB_NAME) as db:
+        if clean_q:
+            like_pat = f"%{clean_q}%"
+            async with db.execute(
+                """
+                SELECT song_id, file_id, title, artist, download_count
+                FROM track_cache
+                WHERE file_id IS NOT NULL AND file_id != ''
+                  AND (title LIKE ? OR artist LIKE ?)
+                ORDER BY
+                  CASE WHEN title LIKE ? THEN 0 ELSE 1 END,
+                  download_count DESC
+                LIMIT ?
+                """,
+                (like_pat, like_pat, like_pat, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [
+                    {
+                        "song_id": r[0],
+                        "file_id": r[1],
+                        "title": r[2] or "Suno Track",
+                        "artist": r[3] or "Suno AI",
+                        "download_count": r[4] or 1,
+                    }
+                    for r in rows
+                ]
+        else:
+            results = []
+            seen_ids = set()
+            if user_id:
+                async with db.execute(
+                    """
+                    SELECT tc.song_id, tc.file_id, tc.title, tc.artist, tc.download_count
+                    FROM user_tracks ut
+                    JOIN track_cache tc ON ut.song_id = tc.song_id
+                    WHERE ut.user_id = ? AND tc.file_id IS NOT NULL AND tc.file_id != ''
+                    ORDER BY ut.id DESC
+                    LIMIT ?
+                    """,
+                    (user_id, limit),
+                ) as cursor:
+                    for r in await cursor.fetchall():
+                        if r[0] not in seen_ids:
+                            seen_ids.add(r[0])
+                            results.append({
+                                "song_id": r[0],
+                                "file_id": r[1],
+                                "title": r[2] or "Suno Track",
+                                "artist": r[3] or "Suno AI",
+                                "download_count": r[4] or 1,
+                            })
+            if len(results) < limit:
+                needed = limit - len(results)
+                async with db.execute(
+                    """
+                    SELECT song_id, file_id, title, artist, download_count
+                    FROM track_cache
+                    WHERE file_id IS NOT NULL AND file_id != ''
+                    ORDER BY download_count DESC
+                    LIMIT ?
+                    """,
+                    (needed + len(seen_ids),),
+                ) as cursor:
+                    for r in await cursor.fetchall():
+                        if r[0] not in seen_ids:
+                            seen_ids.add(r[0])
+                            results.append({
+                                "song_id": r[0],
+                                "file_id": r[1],
+                                "title": r[2] or "Suno Track",
+                                "artist": r[3] or "Suno AI",
+                                "download_count": r[4] or 1,
+                            })
+                            if len(results) >= limit:
+                                break
+            return results
+
+
 # ─── Системные настройки и промо ──────────────────────────────────────────────
 
 async def get_setting(key: str, default: str = "") -> str:

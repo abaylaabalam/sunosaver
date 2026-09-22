@@ -12,6 +12,7 @@ import tempfile
 import time
 import uuid
 import zipfile
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -42,6 +43,10 @@ from aiogram.types import (
     BotCommandScopeDefault,
     LabeledPrice,
     PreCheckoutQuery,
+    InlineQuery,
+    InlineQueryResultAudio,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
 )
 import base64
 import hashlib
@@ -491,9 +496,15 @@ TEXTS = {
         "pl_tracks_word": "треков",
         "pl_prompt_action": "Выберите действие:",
         "btn_pl_download": "📥 Скачать все треки ({count})",
+        "btn_pl_zip": "📦 Скачать ZIP-архивом ({count})",
         "btn_pl_mix": "🎛 Собрать плейлист в микс",
         "pl_not_found": "❌ Не удалось загрузить плейлист. Убедитесь, что ссылка верна и плейлист публичный.",
         "pl_downloading": "📥 Начинаю скачивание плейлиста ({count} треков)...",
+        "pl_zip_building": "⏳ <b>Формирую ZIP-архив плейлиста...</b>\nСкачано и упаковано: <b>{current}/{total}</b> треков.",
+        "pl_zip_sending": "📤 <b>Отправляю готовый ZIP-архив...</b>",
+        "pl_zip_caption": "📦 <b>{title}</b>\n🎵 Треков в архиве: <b>{count}</b>\n👤 Автор: {creator}\n⚡️ @sunosaver_bot",
+        "pl_zip_limit_free": "⭐️ <i>Бесплатным пользователям пакуется до {limit} треков. Пригласите 3 друзей по вашей ссылке для безлимита:\n{ref_url}</i>",
+        "inline_share_btn": "🎧 Скачать трек в боте",
         "pl_mix_added": "✅ <b>{count}</b> треков из плейлиста добавлены в конструктор микса!",
         "btn_donate": "☕️ Поддержать бота",
         "donate_title": (
@@ -727,9 +738,15 @@ TEXTS = {
         "pl_tracks_word": "tracks",
         "pl_prompt_action": "Choose an action:",
         "btn_pl_download": "📥 Download all tracks ({count})",
+        "btn_pl_zip": "📦 Download as ZIP ({count})",
         "btn_pl_mix": "🎛 Build mix from playlist",
         "pl_not_found": "❌ Could not load playlist. Make sure the link is valid and public.",
         "pl_downloading": "📥 Starting playlist download ({count} tracks)...",
+        "pl_zip_building": "⏳ <b>Building playlist ZIP archive...</b>\nPacked: <b>{current}/{total}</b> tracks.",
+        "pl_zip_sending": "📤 <b>Uploading ZIP archive...</b>",
+        "pl_zip_caption": "📦 <b>{title}</b>\n🎵 Tracks in archive: <b>{count}</b>\n👤 Creator: {creator}\n⚡️ @sunosaver_bot",
+        "pl_zip_limit_free": "⭐️ <i>Free users get up to {limit} tracks in ZIP. Invite 3 friends for unlimited downloads:\n{ref_url}</i>",
+        "inline_share_btn": "🎧 Download track in bot",
         "pl_mix_added": "✅ <b>{count}</b> tracks from the playlist added to mix builder!",
         "btn_donate": "☕️ Support Project",
         "donate_title": (
@@ -963,9 +980,15 @@ TEXTS = {
         "pl_tracks_word": "трек",
         "pl_prompt_action": "Әрекетті таңдаңыз:",
         "btn_pl_download": "📥 Барлық тректі жүктеу ({count})",
+        "btn_pl_zip": "📦 ZIP-архив ретінде жүктеу ({count})",
         "btn_pl_mix": "🎛 Плейлисттен микс жасау",
         "pl_not_found": "❌ Плейлистті жүктеу мүмкін болмады. Сілтеме дұрыс және плейлист ашық екеніне көз жеткізіңіз.",
         "pl_downloading": "📥 Плейлистті жүктеу басталды ({count} трек)...",
+        "pl_zip_building": "⏳ <b>Плейлист ZIP-архиві жасалуда...</b>\n{current}/{total} трек жиналды.",
+        "pl_zip_sending": "📤 <b>ZIP-архив жіберілуде...</b>",
+        "pl_zip_caption": "📦 <b>{title}</b>\n🎵 Архивтегі тректер: <b>{count}</b>\n👤 Авторы: {creator}\n⚡️ @sunosaver_bot",
+        "pl_zip_limit_free": "⭐️ <i>Тегін пайдаланушыларға {limit} трекке дейін жиналады. Шектеусіз үшін 3 дос шақырыңыз:\n{ref_url}</i>",
+        "inline_share_btn": "🎧 Тректі ботта ашу",
         "pl_mix_added": "✅ Плейлисттен <b>{count}</b> трек микс шеберіне қосылды!",
         "btn_donate": "☕️ Жобаны қолдау",
         "donate_title": (
@@ -1800,9 +1823,10 @@ async def fetch_suno_playlist(playlist_id: str, session: aiohttp.ClientSession, 
 
 
 def get_playlist_inline_keyboard(lang: str, playlist_id: str, tracks_count: int) -> InlineKeyboardMarkup:
-    t = TEXTS[lang]
+    t = TEXTS.get(lang, TEXTS["ru"])
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t["btn_pl_download"].format(count=tracks_count), callback_data=f"pl_dl:{playlist_id}")],
+        [InlineKeyboardButton(text=t["btn_pl_zip"].format(count=tracks_count), callback_data=f"pl_zip:{playlist_id}")],
         [InlineKeyboardButton(text=t["btn_pl_mix"], callback_data=f"pl_mix:{playlist_id}")],
     ])
 
@@ -2105,6 +2129,14 @@ async def cmd_start(message: types.Message, command: CommandObject):
         t = TEXTS.get(lang, TEXTS["ru"])
         await message.answer(t["donate_title"], reply_markup=get_donate_inline_keyboard(lang), parse_mode="HTML")
         return
+
+    if command.args and command.args.strip().startswith("song_"):
+        target_s_id = command.args.strip()[5:].strip()
+        if target_s_id:
+            s_url = f"https://suno.com/song/{target_s_id}"
+            t = TEXTS.get(lang, TEXTS["ru"])
+            await _download_and_send(message, s_url, lang, t, user_id=user_id, user=message.from_user)
+            return
 
     await message.answer(TEXTS[lang]["start"], reply_markup=get_main_menu_keyboard(lang), parse_mode="HTML")
 
@@ -3972,6 +4004,144 @@ async def handle_playlist_download(callback: CallbackQuery):
         )
 
 
+@dp.callback_query(F.data.startswith("pl_zip:"))
+async def handle_playlist_zip(callback: CallbackQuery):
+    playlist_id = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    lang = await database.get_user_language(user_id, get_lang_fallback(callback.from_user))
+    t = TEXTS.get(lang, TEXTS["ru"])
+
+    if not await check_user_subscription(user_id):
+        await callback.answer(t["sub_failed"], show_alert=True)
+        return
+
+    is_pro = await database.is_user_pro(user_id, admin_id=ADMIN_ID)
+    limit = 15 if is_pro else 5
+
+    pl_data = await fetch_suno_playlist(playlist_id, HTTP_SESSION, limit=limit)
+    if not pl_data or not pl_data["tracks"]:
+        await callback.answer(t["pl_not_found"], show_alert=True)
+        return
+
+    await callback.answer()
+    tracks = pl_data["tracks"]
+    total_in_pl = pl_data.get("total", len(tracks))
+    pl_title = pl_data.get("title") or "Suno Playlist"
+    clean_pl_title = re.sub(r'[\\/*?:"<>|]', "", pl_title).strip() or "Suno Playlist"
+    creator = pl_data.get("creator") or "Suno Creator"
+
+    status_msg = await callback.message.answer(
+        t["pl_zip_building"].format(current=0, total=len(tracks)),
+        parse_mode="HTML"
+    )
+
+    tmp_dir = tempfile.mkdtemp(prefix="suno_zip_")
+    zip_path = os.path.join(tmp_dir, f"{clean_pl_title}.zip")
+
+    try:
+        mp3_files = []
+        for idx, tr in enumerate(tracks, 1):
+            s_id = tr["song_id"]
+            tr_title = tr.get("title") or f"Track_{idx}"
+            clean_tr_title = re.sub(r'[\\/*?:"<>|]', "", tr_title).strip() or f"Track_{idx}"
+            tr_artist = tr.get("author") or creator
+
+            # 1. Пробуем из кэша
+            cached_data = await database.get_cached_track(s_id)
+            raw_audio = None
+            image_bytes = None
+            if cached_data and cached_data[0]:
+                fid = cached_data[0]
+                try:
+                    tg_file = await bot.get_file(fid)
+                    if tg_file.file_path:
+                        buf = io.BytesIO()
+                        await bot.download_file(tg_file.file_path, buf)
+                        raw_audio = buf.getvalue()
+                except Exception as cf_err:
+                    logger.warning("Не удалось скачать кэшированный file_id для ZIP: %s", cf_err)
+
+            # 2. Если нет в кэше — качаем напрямую
+            if not raw_audio:
+                suno_song_url = f"https://suno.com/song/{s_id}"
+                try:
+                    res = await download_direct_from_suno(suno_song_url, HTTP_SESSION)
+                    raw_audio, d_title, _, _, d_author, image_bytes, _ = res
+                    if d_title and d_title != "Suno Track":
+                        clean_tr_title = re.sub(r'[\\/*?:"<>|]', "", d_title).strip()
+                    if d_author:
+                        tr_artist = d_author
+                except Exception as dl_err:
+                    logger.warning("Ошибка скачивания трека %s для ZIP: %s", s_id, dl_err)
+
+            if raw_audio and is_valid_mp3(raw_audio):
+                tagged_bytes, _ = add_id3_tags(raw_audio, clean_tr_title, tr_artist, image_bytes=image_bytes)
+                fname = f"{idx:02d}. {clean_tr_title}.mp3"
+                fpath = os.path.join(tmp_dir, fname)
+                with open(fpath, "wb") as f_out:
+                    f_out.write(tagged_bytes)
+                mp3_files.append((fpath, fname))
+
+            # Обновляем прогресс каждые 2 трека или в конце
+            if idx % 2 == 0 or idx == len(tracks):
+                try:
+                    await status_msg.edit_text(
+                        t["pl_zip_building"].format(current=idx, total=len(tracks)),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
+        if not mp3_files:
+            await status_msg.edit_text(t["error_download"], parse_mode="HTML")
+            return
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fpath, fname in mp3_files:
+                zf.write(fpath, arcname=fname)
+
+        zip_size = os.path.getsize(zip_path)
+        if zip_size > 50 * 1024 * 1024:
+            await status_msg.edit_text(
+                "❌ ZIP-архив превысил 50 МБ (лимит Telegram). Скачайте треки по отдельности.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=t["btn_pl_download"].format(count=len(tracks)), callback_data=f"pl_dl:{playlist_id}")]
+                ])
+            )
+            return
+
+        try:
+            await status_msg.edit_text(t["pl_zip_sending"], parse_mode="HTML")
+        except Exception:
+            pass
+
+        caption = t["pl_zip_caption"].format(
+            title=html.escape(clean_pl_title),
+            count=len(mp3_files),
+            creator=html.escape(creator)
+        )
+        if not is_pro and total_in_pl > limit:
+            ref_url = f"https://t.me/sunosaver_bot?start=ref_{user_id}"
+            caption += "\n\n" + t["pl_zip_limit_free"].format(limit=limit, ref_url=ref_url)
+
+        doc_file = FSInputFile(zip_path, filename=f"{clean_pl_title}.zip")
+        await callback.message.reply_document(
+            document=doc_file,
+            caption=caption,
+            parse_mode="HTML"
+        )
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+    finally:
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 @dp.callback_query(F.data.startswith("pl_mix:"))
 async def handle_playlist_mix(callback: CallbackQuery):
     playlist_id = callback.data.split(":", 1)[1]
@@ -4991,6 +5161,70 @@ async def handle_suno_link(message: types.Message):
                 InlineKeyboardButton(text=t["btn_mix_these"], callback_data=f"mix_q:{token}")
             ]])
             await message.answer(f"🎛 <b>{t['btn_mix_these']}?</b>", reply_markup=kb_mix, parse_mode="HTML")
+
+
+# ─── Инлайн-поиск (@sunosaver_bot) ─────────────────────────────────────────────
+
+@dp.inline_query()
+async def handle_inline_query(inline_query: InlineQuery):
+    query = inline_query.query.strip()
+    user_id = inline_query.from_user.id
+    lang = get_lang_fallback(inline_query.from_user)
+    t = TEXTS.get(lang, TEXTS["ru"])
+
+    tracks = await database.search_cached_tracks(user_id=user_id, query=query, limit=25)
+
+    results = []
+    if tracks:
+        for idx, item in enumerate(tracks):
+            s_id = item["song_id"]
+            fid = item["file_id"]
+            title = item.get("title") or "Suno Track"
+            artist = item.get("artist") or "Suno AI (@sunosaver_bot)"
+            escaped_title = html.escape(title)
+            escaped_artist = html.escape(artist)
+            caption = f"🎵 <b>{escaped_title}</b>\n{t.get('artist_label', '👤 Автор')}: {escaped_artist}\n⚡️ @sunosaver_bot"
+
+            open_btn = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=t.get("inline_share_btn", "🎧 Скачать трек в боте"), url=f"https://t.me/sunosaver_bot?start=song_{s_id}")]
+            ])
+
+            results.append(
+                InlineQueryResultAudio(
+                    id=f"audio_{s_id}_{idx}",
+                    audio_file_id=fid,
+                    caption=caption,
+                    title=title,
+                    performer=artist,
+                    reply_markup=open_btn,
+                    parse_mode="HTML",
+                )
+            )
+    else:
+        results.append(
+            InlineQueryResultArticle(
+                id="no_results",
+                title="🔍 Ничего не найдено",
+                description="Отправьте ссылку на трек Suno боту, чтобы добавить его в базу!",
+                input_message_content=InputTextMessageContent(
+                    message_text=(
+                        "🎧 <b>SunoSaver — Сохраняйте музыку с Suno AI!</b>\n\n"
+                        "Отправьте мне ссылку на любую песню Suno в ЛС, и я пришлю готовый MP3, WAV, видео и вокал/минус!\n\n"
+                        "👉 @sunosaver_bot"
+                    ),
+                    parse_mode="HTML",
+                ),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🚀 Открыть бота", url="https://t.me/sunosaver_bot")]
+                ]),
+            )
+        )
+
+    await inline_query.answer(
+        results=results,
+        cache_time=5,
+        is_personal=True,
+    )
 
 
 # ─── Регистрация команд ────────────────────────────────────────────────────────
