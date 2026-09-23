@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SunoSaver — Suno AI Music & MP3 Downloader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Download Suno AI songs in high quality MP3/WAV, download full playlists, and split vocals & stems with one click.",
   "icons": {
     "16": "icons/icon16.png",
@@ -36,7 +36,7 @@
         "*://*.suno.com/*",
         "*://*.suno.ai/*"
       ],
-      "js": ["content.js"],
+      "js": ["lib/lame.min.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }
