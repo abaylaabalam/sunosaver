@@ -1,9 +1,9 @@
 /**
  * SunoSaver Content Script
  * Injected on suno.com:
- * 1. Decrypts native Suno stream via Web Crypto API
+ * 1. Decrypts native Suno audio stream via Web Crypto API (AES-GCM + AES-CTR)
  * 2. Decodes PCM via AudioContext
- * 3. Encodes to true, universal MP3 (via lamejs) with exact duration & timeline
+ * 3. Encodes to true standard MP3 (via lamejs) or lossless WAV with exact duration & audio
  */
 
 const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
@@ -21,24 +21,17 @@ function b64ToUint8Array(b64) {
   return arr;
 }
 
-/**
- * Safely send a message to runtime/background without throwing
- * "Receiving end does not exist" or "Cannot read properties of undefined"
- */
 function safeSendMessage(message, callback) {
   try {
     if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id) {
       chrome.runtime.sendMessage(message, (response) => {
-        // Must inspect lastError to prevent Chrome from logging Unchecked runtime.lastError
         const err = chrome.runtime.lastError;
         if (callback && !err) {
           callback(response);
         }
       });
     }
-  } catch (e) {
-    // Context invalidated due to extension update/reload; ignore gracefully
-  }
+  } catch (e) {}
 }
 
 /**
@@ -48,11 +41,12 @@ function encodeAudioBufferToMp3(audioBuffer, bitrate = 256) {
   const channels = audioBuffer.numberOfChannels;
   const sampleRate = audioBuffer.sampleRate;
   
-  if (typeof lamejs === "undefined") {
+  const lame = (typeof lamejs !== "undefined" ? lamejs : (typeof window !== "undefined" && window.lamejs ? window.lamejs : (typeof globalThis !== "undefined" ? globalThis.lamejs : null)));
+  if (!lame || !lame.Mp3Encoder) {
     throw new Error("lamejs encoder not loaded");
   }
 
-  const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, bitrate);
+  const mp3encoder = new lame.Mp3Encoder(channels, sampleRate, bitrate);
   const mp3Data = [];
 
   const left = audioBuffer.getChannelData(0);
@@ -141,13 +135,13 @@ function encodeAudioBufferToWav(buffer) {
 
 /**
  * Main Download Function:
- * 1. Metadata -> 2. Rights -> 3. Decrypt AES-CTR -> 4. Decode PCM -> 5. MP3 Encode
+ * Decrypts Suno AES-CTR -> Decodes to AudioBuffer -> Encodes to MP3 or WAV
  */
 async function downloadSunoTrack(uuid, fallbackTitle, fallbackAuthor, format = "mp3") {
   let title = fallbackTitle || "Suno Track";
   let author = fallbackAuthor || "Suno AI";
 
-  // 1. Fetch metadata
+  // 1. Fetch real track metadata from Suno studio API
   try {
     const metaResp = await fetch(`https://studio-api.prod.suno.com/api/clip/${uuid}`);
     if (metaResp.ok) {
@@ -163,7 +157,7 @@ async function downloadSunoTrack(uuid, fallbackTitle, fallbackAuthor, format = "
   const cleanTitle = (title || "Suno Track").replace(/[\\/:*?"<>|]/g, "_").trim();
   const cleanAuthor = (author || "Suno AI").replace(/[\\/:*?"<>|]/g, "_").trim();
 
-  // 2. Request rights
+  // 2. Request mango rights
   const rightsResp = await fetch("https://studio-api.prod.suno.com/api/mango/rights", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -179,7 +173,7 @@ async function downloadSunoTrack(uuid, fallbackTitle, fallbackAuthor, format = "
   const wrappedKeyBytes = b64ToUint8Array(rights.key);
   const wrappedIvBytes = b64ToUint8Array(rights.iv);
 
-  // 3. User key via SHA-256
+  // 3. Compute user key via SHA-256
   const userKeyRaw = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(glt));
   const userKey = await crypto.subtle.importKey("raw", userKeyRaw, { name: "AES-GCM" }, false, ["decrypt"]);
   const aad = new TextEncoder().encode(uuid);
@@ -212,29 +206,35 @@ async function downloadSunoTrack(uuid, fallbackTitle, fallbackAuthor, format = "
     encBuffer
   );
 
-  // 6. Decode into PCM with Web Audio API (Gets exact duration and full uncompressed audio)
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  const audioCtx = new AudioContextClass();
-  const audioBuffer = await audioCtx.decodeAudioData(decAudio);
-
   let finalBlob;
   let filename;
 
-  if (format === "wav") {
-    finalBlob = encodeAudioBufferToWav(audioBuffer);
-    filename = `${cleanTitle} - ${cleanAuthor}.wav`;
-  } else {
-    try {
-      finalBlob = encodeAudioBufferToMp3(audioBuffer, 256);
-      filename = `${cleanTitle} - ${cleanAuthor}.mp3`;
-    } catch (encErr) {
-      console.warn("[SunoSaver] MP3 encoder fallback to WAV:", encErr);
+  // 6. Try decode with Web Audio API to produce standard MP3 / WAV
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContextClass();
+    const audioBuffer = await audioCtx.decodeAudioData(decAudio.slice(0));
+
+    if (format === "wav") {
       finalBlob = encodeAudioBufferToWav(audioBuffer);
       filename = `${cleanTitle} - ${cleanAuthor}.wav`;
+    } else {
+      try {
+        finalBlob = encodeAudioBufferToMp3(audioBuffer, 256);
+        filename = `${cleanTitle} - ${cleanAuthor}.mp3`;
+      } catch (mp3Err) {
+        console.warn("[SunoSaver] MP3 encoder fallback to WAV:", mp3Err);
+        finalBlob = encodeAudioBufferToWav(audioBuffer);
+        filename = `${cleanTitle} - ${cleanAuthor}.wav`;
+      }
     }
+  } catch (decodeErr) {
+    console.warn("[SunoSaver] Web Audio decode failed, direct fallback:", decodeErr);
+    finalBlob = new Blob([decAudio], { type: "audio/mp4" });
+    filename = `${cleanTitle} - ${cleanAuthor}.m4a`;
   }
 
-  // 7. Trigger browser download with real MP3 / WAV
+  // 7. Trigger browser download
   const blobUrl = URL.createObjectURL(finalBlob);
   const a = document.createElement("a");
   a.href = blobUrl;
@@ -306,7 +306,7 @@ function injectFloatingDownloadButton() {
       <div id="sunosaver-display-title" class="sunosaver-widget-title">${escapeHTML(titleText)}</div>
     </div>
     <div class="sunosaver-widget-actions">
-      <button id="sunosaver-download-btn" class="sunosaver-btn">
+      <button id="sunosaver-download-btn" class="sunosaver-btn" title="Скачать MP3 256k с длительностью">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="7 10 12 15 17 10"></polyline>
@@ -314,22 +314,25 @@ function injectFloatingDownloadButton() {
         </svg>
         MP3
       </button>
-      <button id="sunosaver-tg-btn" class="sunosaver-btn" style="border-color: #8b5cf6; background: linear-gradient(135deg, #2e1065 0%, #0f172a 100%);">
-        🎙 Вокал / WAV
+      <button id="sunosaver-download-wav-btn" class="sunosaver-btn" style="border-color: #06b6d4; background: linear-gradient(135deg, #0e7490 0%, #0f172a 100%);" title="Скачать несжатый студийный WAV">
+        🎵 WAV
+      </button>
+      <button id="sunosaver-tg-btn" class="sunosaver-btn" style="border-color: #8b5cf6; background: linear-gradient(135deg, #2e1065 0%, #0f172a 100%);" title="Открыть в боте (Вокал, Минус, Видео)">
+        🎙 Вокал
       </button>
     </div>
   `;
 
   document.body.appendChild(widget);
 
-  // Hook Download
+  // Hook MP3 Download
   document.getElementById("sunosaver-download-btn").addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     btn.classList.add("loading");
-    btn.textContent = "⏳ Конвертация MP3...";
+    btn.textContent = "⏳ MP3...";
 
     try {
-      await downloadSunoTrack(uuid, titleText, "Suno AI", "mp3");
+      const res = await downloadSunoTrack(uuid, titleText, "Suno AI", "mp3");
       btn.classList.remove("loading");
       btn.classList.add("success");
       btn.textContent = "✅ Скачано!";
@@ -347,10 +350,29 @@ function injectFloatingDownloadButton() {
     } catch (err) {
       console.error("[SunoSaver] Download error:", err);
       btn.classList.remove("loading");
-      btn.textContent = "🤖 Открыть в боте...";
+      window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
+    }
+  });
+
+  // Hook WAV Download
+  document.getElementById("sunosaver-download-wav-btn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.classList.add("loading");
+    btn.textContent = "⏳ WAV...";
+
+    try {
+      await downloadSunoTrack(uuid, titleText, "Suno AI", "wav");
+      btn.classList.remove("loading");
+      btn.classList.add("success");
+      btn.textContent = "✅ WAV готов!";
       setTimeout(() => {
-        window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
-      }, 500);
+        btn.classList.remove("success");
+        btn.textContent = "🎵 WAV";
+      }, 3000);
+    } catch (err) {
+      console.error("[SunoSaver] WAV error:", err);
+      btn.classList.remove("loading");
+      window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
     }
   });
 
@@ -381,13 +403,12 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
         downloadSunoTrack(uuid, request.title, request.author, request.format || "mp3")
           .then((res) => sendResponse({ success: true, ...res }))
           .catch((err) => sendResponse({ success: false, error: err.message }));
-        return true; // Keep async channel open
+        return true;
       }
     }
   });
 }
 
-// Observe dynamic DOM changes (SPA navigation)
 const observer = new MutationObserver(() => {
   monitorAudioPlayer();
   injectFloatingDownloadButton();
