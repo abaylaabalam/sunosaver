@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SunoSaver</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-wrapper">
+        <div class="logo-icon">⚡️</div>
+        <div>
+          <div class="brand-title">SunoSaver</div>
+          <div class="brand-subtitle">AI Music & Stems Downloader</div>
+        </div>
+      </div>
+      <a href="https://t.me/sunosaver_bot" target="_blank" class="tg-badge" title="Открыть бота">
+        <span>@sunosaver_bot</span>
+      </a>
+    </header>
+
+    <!-- Detected Song Card -->
+    <div id="track-card" class="track-card">
+      <div class="track-badge">Текущий трек</div>
+      <div id="track-title" class="track-title">Загрузка информации...</div>
+      <div id="track-author" class="track-author">Suno Creator</div>
+      
+      <div class="actions-grid">
+        <button id="btn-download-mp3" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Скачать MP3 (320k)
+        </button>
+
+        <button id="btn-stems" class="btn btn-secondary">
+          <span>🎙</span> Вокал и Минус
+        </button>
+      </div>
+    </div>
+
+    <!-- Empty State (When no track detected) -->
+    <div id="no-track-card" class="no-track-card" style="display: none;">
+      <div class="no-track-icon">🎧</div>
+      <div class="no-track-text">Откройте любую песню или плейлист на <b>suno.com</b> для мгновенного скачивания!</div>
+      <a href="https://suno.com" target="_blank" class="btn btn-outline">Перейти на Suno.com</a>
+    </div>
+
+    <!-- Features & Bot Gateway -->
+    <div class="features-box">
+      <div class="feature-item">
+        <span class="feature-icon">✨</span>
+        <div class="feature-text">
+          <b>Lossless WAV & Видео</b>
+          <span>Студийное качество для сведения</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <span class="feature-icon">📦</span>
+        <div class="feature-text">
+          <b>Плейлисты в ZIP</b>
+          <span>Скачивание целых альбомов</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <span class="feature-icon">🔍</span>
+        <div class="feature-text">
+          <b>Инлайн-поиск</b>
+          <span>@sunosaver_bot в любом чате</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer Action -->
+    <footer class="footer">
+      <button id="btn-open-bot" class="btn btn-telegram">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+        </svg>
+        Открыть Telegram-бота
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
