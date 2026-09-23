@@ -22,6 +22,26 @@ function b64ToUint8Array(b64) {
 }
 
 /**
+ * Safely send a message to runtime/background without throwing
+ * "Receiving end does not exist" or "Cannot read properties of undefined"
+ */
+function safeSendMessage(message, callback) {
+  try {
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id) {
+      chrome.runtime.sendMessage(message, (response) => {
+        // Must inspect lastError to prevent Chrome from logging Unchecked runtime.lastError
+        const err = chrome.runtime.lastError;
+        if (callback && !err) {
+          callback(response);
+        }
+      });
+    }
+  } catch (e) {
+    // Context invalidated due to extension update/reload; ignore gracefully
+  }
+}
+
+/**
  * Converts an AudioBuffer into standard MP3 using lamejs
  */
 function encodeAudioBufferToMp3(audioBuffer, bitrate = 256) {
@@ -247,7 +267,7 @@ function monitorAudioPlayer() {
       const authorEl = document.querySelector('[data-testid="song-artist"], a[href^="/@"]');
       if (authorEl && authorEl.textContent) author = authorEl.textContent.trim().replace("@", "");
 
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         action: "track_detected",
         data: {
           uuid: uuid,
@@ -353,17 +373,19 @@ function escapeHTML(str) {
 }
 
 // Listen for messages from popup
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "download_current_page_track") {
-    const uuid = extractUUID(window.location.pathname) || request.uuid;
-    if (uuid) {
-      downloadSunoTrack(uuid, request.title, request.author, request.format || "mp3")
-        .then((res) => sendResponse({ success: true, ...res }))
-        .catch((err) => sendResponse({ success: false, error: err.message }));
-      return true;
+if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "download_current_page_track") {
+      const uuid = extractUUID(window.location.pathname) || request.uuid;
+      if (uuid) {
+        downloadSunoTrack(uuid, request.title, request.author, request.format || "mp3")
+          .then((res) => sendResponse({ success: true, ...res }))
+          .catch((err) => sendResponse({ success: false, error: err.message }));
+        return true; // Keep async channel open
+      }
     }
-  }
-});
+  });
+}
 
 // Observe dynamic DOM changes (SPA navigation)
 const observer = new MutationObserver(() => {
