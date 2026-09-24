@@ -136,7 +136,10 @@ async def notify_admin_error(
     if not ADMIN_ID:
         return
 
-    if isinstance(error, (TrackNotFoundError, TrackStillProcessingError, WavTooLargeError)):
+    if isinstance(error, (TrackNotFoundError, TrackStillProcessingError, WavTooLargeError, TelegramForbiddenError)):
+        return
+
+    if "bot was blocked by the user" in str(error).lower():
         return
 
     err_type = type(error).__name__ if isinstance(error, Exception) else "Error"
@@ -253,10 +256,17 @@ async def edit_or_send_status(status_msg: types.Message | None, chat_id: int, te
     if status_msg:
         try:
             return await status_msg.edit_text(text, **kwargs)
+        except TelegramForbiddenError:
+            return None
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e).lower():
+                return status_msg
         except Exception:
             pass
     try:
         return await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+    except TelegramForbiddenError:
+        return None
     except Exception as e:
         logger.warning("Не удалось отправить статус-сообщение: %s", e)
         return None
@@ -378,6 +388,7 @@ TEXTS = {
         "wav_too_large":  "⚠️ Этот трек слишком длинный для формата WAV (лимит Telegram — 50 МБ).\nРекомендуем слушать или скачивать трек в формате MP3.",
         "video_generating":"⏳ Создаю и загружаю видеоклип (MP4)...",
         "video_error":    "❌ Не удалось подготовить видео. Попробуйте позже.",
+        "video_too_large": "⚠️ Видео превышает допустимый размер Telegram (50 МБ).",
         "btn_download_own": "🤖 Скачать свой трек",
         "btn_how_to":    "📥 Как скачать?",
         "btn_settings":  "⚙️ Настройки",
@@ -620,6 +631,7 @@ TEXTS = {
         "wav_too_large":  "⚠️ This track is too long for uncompressed WAV format (Telegram limit is 50 MB).\nPlease download the track in MP3 format.",
         "video_generating":"⏳ Generating and uploading video (MP4)...",
         "video_error":    "❌ Could not prepare video. Please try again later.",
+        "video_too_large": "⚠️ The video exceeds Telegram's file size limit (50 MB).",
         "btn_download_own": "🤖 Download Your Track",
         "btn_how_to":    "📥 How to download?",
         "btn_settings":  "⚙️ Settings",
@@ -862,6 +874,7 @@ TEXTS = {
         "wav_too_large":  "⚠️ Бұл трек қысылмаған WAV пішімі үшін тым ұзын (Telegram шегі — 50 МБ).\nТректі MP3 пішімінде жүктеп алуды ұсынамыз.",
         "video_generating":"⏳ Бейнеклип (MP4) дайындалуда және жүктелуде...",
         "video_error":    "❌ Бейнені дайындау мүмкін болмады. Кейінірек көріңіз.",
+        "video_too_large": "⚠️ Бейне Telegram өлшемі шегінен асады (50 МБ).",
         "btn_download_own": "🤖 Өз трегіңізді жүктеу",
         "btn_how_to":    "📥 Қалай жүктейді?",
         "btn_settings":  "⚙️ Баптаулар",
@@ -1483,6 +1496,8 @@ async def convert_and_download_mp3(
             if attempt < max_attempts:
                 await asyncio.sleep(2 ** attempt)
                 continue
+        except TrackNotFoundError:
+            raise
         except Exception as e:
             logger.error("Неожиданное исключение: %s", e, exc_info=True)
             break
@@ -2045,6 +2060,9 @@ async def _download_and_send(
             logger.info("Трек ещё генерируется Suno: %s", suno_url)
         except Exception:
             pass
+        return False
+    except TelegramForbiddenError:
+        logger.info("Пользователь %s заблокировал бота во время отправки трека", effective_user_id)
         return False
     except Exception as e:
         logger.error("Ошибка пайплайна: %s", e, exc_info=True)
@@ -3353,12 +3371,24 @@ async def handle_language_selection(callback: CallbackQuery):
     await database.set_user_language(callback.from_user.id, new_lang)
     t = TEXTS[new_lang]
     await callback.answer()
-    await callback.message.edit_text(
-        t["lang_changed"], reply_markup=get_language_inline_keyboard(), parse_mode="HTML"
-    )
-    await callback.message.answer(
-        t["start"], reply_markup=get_main_menu_keyboard(new_lang), parse_mode="HTML"
-    )
+    try:
+        await callback.message.edit_text(
+            t["lang_changed"], reply_markup=get_language_inline_keyboard(), parse_mode="HTML"
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e).lower():
+            raise
+    except TelegramForbiddenError:
+        return
+    except Exception:
+        pass
+
+    try:
+        await callback.message.answer(
+            t["start"], reply_markup=get_main_menu_keyboard(new_lang), parse_mode="HTML"
+        )
+    except TelegramForbiddenError:
+        pass
 
 
 @dp.callback_query(F.data == "check_sub_again")
@@ -4549,7 +4579,9 @@ async def handle_wav_callback(callback: CallbackQuery):
 
         await progress_msg.delete()
 
-    except WavTooLargeError:
+    except TelegramForbiddenError:
+        logger.info("Пользователь %s заблокировал бота во время отправки WAV", callback.from_user.id)
+    except (WavTooLargeError, TelegramEntityTooLarge):
         try:
             err_text = t.get("wav_too_large", "⚠️ Этот трек слишком длинный для формата WAV (лимит Telegram — 50 МБ).\nРекомендуем слушать или скачивать трек в формате MP3.") + t.get("error_contact", "")
             await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
@@ -4747,6 +4779,101 @@ async def generate_or_fetch_video(
     return None, "Suno Track", uuid
 
 
+async def _compress_video_to_size_limit(
+    video_res: str | bytes,
+    max_bytes: int = 48 * 1024 * 1024,
+    target_bytes: int = 42 * 1024 * 1024,
+) -> tuple[str | bytes, str | None]:
+    """
+    Проверяет размер видео. Если он превышает max_bytes, сжимает видео с помощью ffmpeg до ~target_bytes.
+    Возвращает (compressed_video_or_path, tmp_cleanup_dir).
+    """
+    size = len(video_res) if isinstance(video_res, bytes) else (os.path.getsize(video_res) if os.path.exists(video_res) else 0)
+    if size <= max_bytes:
+        return video_res, None
+
+    logger.info("Видео превышает лимит Telegram (%s байт > %s байт), запускаем сжатие...", size, max_bytes)
+    comp_dir = tempfile.mkdtemp(prefix="compress_video_")
+    in_path = os.path.join(comp_dir, "input.mp4")
+    out_path = os.path.join(comp_dir, "compressed.mp4")
+
+    try:
+        if isinstance(video_res, bytes):
+            with open(in_path, "wb") as f:
+                f.write(video_res)
+        else:
+            in_path = video_res
+
+        duration = 0.0
+        try:
+            probe_proc = await asyncio.create_subprocess_exec(
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", in_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await probe_proc.communicate()
+            if probe_proc.returncode == 0:
+                duration = float(stdout.decode().strip())
+        except Exception as probe_err:
+            logger.warning("Не удалось определить длительность видео через ffprobe: %s", probe_err)
+
+        if duration > 0:
+            target_total_bps = int((target_bytes * 8) / duration)
+            audio_bps = min(128_000, max(64_000, int(target_total_bps * 0.15)))
+            video_bps = max(150_000, target_total_bps - audio_bps)
+            video_kbps = f"{video_bps // 1000}k"
+            audio_kbps = f"{audio_bps // 1000}k"
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", "-i", in_path,
+                "-c:v", "libx264", "-b:v", video_kbps,
+                "-maxrate", f"{int(video_bps * 1.3) // 1000}k",
+                "-bufsize", f"{int(video_bps * 2) // 1000}k",
+                "-vf", "scale=min(720\\,iw):-2",
+                "-c:a", "aac", "-b:a", audio_kbps,
+                "-preset", "fast",
+                "-movflags", "+faststart",
+                out_path
+            ]
+        else:
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", "-i", in_path,
+                "-c:v", "libx264", "-crf", "30",
+                "-vf", "scale=min(640\\,iw):-2",
+                "-c:a", "aac", "-b:a", "96k",
+                "-preset", "fast",
+                "-movflags", "+faststart",
+                out_path
+            ]
+
+        comp_proc = await asyncio.create_subprocess_exec(
+            *ffmpeg_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await comp_proc.communicate()
+
+        if comp_proc.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+            out_size = os.path.getsize(out_path)
+            logger.info("Видео успешно сжато: %s -> %s байт", size, out_size)
+            if in_path != video_res and os.path.exists(in_path):
+                try:
+                    os.remove(in_path)
+                except Exception:
+                    pass
+            return out_path, comp_dir
+        else:
+            logger.error("Ошибка сжатия видео ffmpeg: %s", stderr.decode(errors="ignore"))
+    except Exception as comp_err:
+        logger.error("Исключение при сжатии видео: %s", comp_err)
+
+    try:
+        shutil.rmtree(comp_dir, ignore_errors=True)
+    except Exception:
+        pass
+    return video_res, None
+
+
 @dp.callback_query(F.data.startswith("video:"))
 async def handle_video_callback(callback: CallbackQuery):
     song_id = callback.data.split(":", 1)[1]
@@ -4780,6 +4907,8 @@ async def handle_video_callback(callback: CallbackQuery):
                 parse_mode="HTML",
             )
             return
+        except TelegramForbiddenError:
+            return
         except Exception as e:
             logger.warning("Кэшированный video_file_id устарел: %s", e)
 
@@ -4795,18 +4924,23 @@ async def handle_video_callback(callback: CallbackQuery):
         if not video_res and resolved_uuid and resolved_uuid != song_id:
             uuid_cached_video = await database.get_cached_video(resolved_uuid)
             if uuid_cached_video:
-                await send_video_safe(
-                    chat_id=callback.message.chat.id,
-                    message=callback.message,
-                    video=uuid_cached_video,
-                    caption=caption,
-                    supports_streaming=True,
-                    request_timeout=180,
-                    parse_mode="HTML",
-                )
-                await database.save_video_cache(song_id, uuid_cached_video)
-                await progress_msg.delete()
-                return
+                try:
+                    await send_video_safe(
+                        chat_id=callback.message.chat.id,
+                        message=callback.message,
+                        video=uuid_cached_video,
+                        caption=caption,
+                        supports_streaming=True,
+                        request_timeout=180,
+                        parse_mode="HTML",
+                    )
+                    await database.save_video_cache(song_id, uuid_cached_video)
+                    await progress_msg.delete()
+                    return
+                except TelegramForbiddenError:
+                    return
+                except Exception:
+                    pass
 
         if not video_res:
             err_text = t["video_error"] + t.get("error_contact", "")
@@ -4820,10 +4954,25 @@ async def handle_video_callback(callback: CallbackQuery):
             caption = f"🎬 <b>{escaped_title}</b>\n⚡️ @sunosaver_bot"
 
         tmp_parent = None
+        if isinstance(video_res, str):
+            tmp_parent = os.path.dirname(video_res)
+
+        # Проверяем размер видео и при необходимости сжимаем, чтобы не превысить лимит Telegram (~50 МБ)
+        compressed_res, comp_dir = await _compress_video_to_size_limit(video_res)
+        if comp_dir:
+            if isinstance(video_res, str) and os.path.exists(video_res):
+                try:
+                    os.remove(video_res)
+                    if tmp_parent and os.path.exists(tmp_parent):
+                        os.rmdir(tmp_parent)
+                except Exception:
+                    pass
+            video_res = compressed_res
+            tmp_parent = comp_dir
+
         if isinstance(video_res, bytes):
             video_input = BufferedInputFile(video_res, filename=f"{safe_title}.mp4")
         else:
-            tmp_parent = os.path.dirname(video_res)
             video_input = FSInputFile(video_res, filename=f"{safe_title}.mp4")
 
         sent_msg = await send_video_safe(
@@ -4854,6 +5003,15 @@ async def handle_video_callback(callback: CallbackQuery):
 
         await progress_msg.delete()
 
+    except TelegramForbiddenError:
+        logger.info("Пользователь %s заблокировал бота во время отправки видео", callback.from_user.id)
+    except TelegramEntityTooLarge as e:
+        logger.warning("Видео превышает лимит Telegram: %s", e)
+        try:
+            err_text = t.get("video_too_large", "⚠️ Видео превышает допустимый размер Telegram (50 МБ).")
+            await progress_msg.edit_text(err_text, reply_markup=get_support_keyboard(lang), parse_mode="HTML")
+        except Exception:
+            pass
     except Exception as e:
         logger.error("Ошибка отправки видео: %s", e, exc_info=True)
         await notify_admin_error("handle_video_callback", e, f"song_id: {song_id}", user=callback.from_user)
@@ -5090,6 +5248,8 @@ async def handle_stems_callback(callback: CallbackQuery):
                 except Exception:
                     pass
 
+    except TelegramForbiddenError:
+        logger.info("Пользователь %s заблокировал бота во время разделения стемов", user_id)
     except Exception as e:
         logger.error("Ошибка при разделении стемов: %s", e, exc_info=True)
         await edit_or_send_status(status_msg, user_id, t["stems_error"], parse_mode="HTML")
