@@ -18,7 +18,7 @@ body {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 /* Header */
@@ -63,21 +63,26 @@ body {
   font-weight: 500;
 }
 
-.tg-badge {
-  text-decoration: none;
+.plan-badge {
   font-size: 10px;
-  font-weight: 600;
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.1);
+  font-weight: 700;
   padding: 4px 8px;
   border-radius: 9999px;
-  border: 1px solid rgba(56, 189, 248, 0.25);
   transition: all 0.2s;
+  letter-spacing: 0.3px;
 }
 
-.tg-badge:hover {
-  background: rgba(56, 189, 248, 0.2);
-  border-color: #38bdf8;
+.badge-free {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.badge-pro {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.12);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  box-shadow: 0 0 10px rgba(250, 204, 21, 0.2);
 }
 
 /* Track Card */
@@ -111,14 +116,58 @@ body {
 .track-author {
   font-size: 11px;
   color: #94a3b8;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .actions-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-top: 2px;
+}
+
+.pro-tag {
+  font-size: 8px;
+  background: #facc15;
+  color: #090d16;
+  font-weight: 800;
+  padding: 2px 4px;
+  border-radius: 4px;
+  margin-left: 2px;
+}
+
+/* Usage Box */
+.usage-box {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
   margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usage-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.progress-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #06b6d4 0%, #3b82f6 100%);
+  border-radius: 999px;
+  transition: width 0.3s ease;
 }
 
 /* Empty State */
@@ -144,42 +193,133 @@ body {
   line-height: 1.4;
 }
 
-/* Features Box */
-.features-box {
+/* PRO Card */
+.pro-card {
+  background: linear-gradient(135deg, rgba(30, 27, 75, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 14px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.15);
+}
+
+.pro-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pro-icon {
+  font-size: 20px;
+}
+
+.pro-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.pro-desc {
+  font-size: 10px;
+  color: #cbd5e1;
+}
+
+.btn-pro {
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(139, 92, 246, 0.35);
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.btn-pro:hover {
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+  box-shadow: 0 5px 14px rgba(139, 92, 246, 0.5);
+  transform: translateY(-1px);
+}
+
+.license-toggle {
+  font-size: 10px;
+  color: #a78bfa;
+  text-align: center;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+
+.license-toggle:hover {
+  color: #c4b5fd;
+}
+
+.license-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.license-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.license-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #ffffff;
+  font-size: 11px;
+  outline: none;
+}
+
+.license-input:focus {
+  border-color: #8b5cf6;
+}
+
+.btn-activate {
+  background: rgba(139, 92, 246, 0.3);
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  color: #ffffff;
+  padding: 6px 12px;
+  font-size: 11px;
+}
+
+.btn-activate:hover {
+  background: rgba(139, 92, 246, 0.5);
+}
+
+.license-msg {
+  font-size: 10px;
+  min-height: 12px;
+}
+
+.license-msg.success {
+  color: #34d399;
+}
+
+.license-msg.error {
+  color: #f87171;
+}
+
+/* PRO Active Card */
+.pro-active-card {
+  background: linear-gradient(135deg, rgba(20, 83, 45, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%);
+  border: 1px solid rgba(34, 197, 94, 0.3);
   border-radius: 12px;
   padding: 10px 12px;
 }
 
-.feature-item {
+.pro-active-content {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.feature-icon {
-  font-size: 16px;
-}
-
-.feature-text {
-  display: flex;
-  flex-direction: column;
-}
-
-.feature-text b {
-  font-size: 11px;
-  color: #e2e8f0;
-}
-
-.feature-text span {
-  font-size: 10px;
-  color: #64748b;
-}
-
-/* Buttons */
+/* General Buttons */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -246,13 +386,13 @@ body {
   width: 100%;
   background: #24A1DE;
   color: #ffffff;
-  padding: 11px 16px;
-  font-size: 13px;
-  box-shadow: 0 4px 12px rgba(36, 161, 222, 0.3);
+  padding: 9px 14px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(36, 161, 222, 0.25);
 }
 
 .btn-telegram:hover {
   background: #2093cb;
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(36, 161, 222, 0.45);
+  box-shadow: 0 6px 16px rgba(36, 161, 222, 0.4);
 }

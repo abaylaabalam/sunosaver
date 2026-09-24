@@ -91,7 +91,7 @@ function injectFloatingDownloadButton() {
       <div id="sunosaver-display-title" class="sunosaver-widget-title">${escapeHTML(titleText)}</div>
     </div>
     <div class="sunosaver-widget-actions">
-      <button id="sunosaver-download-btn" class="sunosaver-btn" title="Скачать MP3 256k с длительностью">
+      <button id="sunosaver-download-btn" class="sunosaver-btn" title="Download MP3 256k (Free: 10/day)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="7 10 12 15 17 10"></polyline>
@@ -99,11 +99,11 @@ function injectFloatingDownloadButton() {
         </svg>
         MP3
       </button>
-      <button id="sunosaver-download-wav-btn" class="sunosaver-btn" style="border-color: #06b6d4; background: linear-gradient(135deg, #0e7490 0%, #0f172a 100%);" title="Скачать несжатый студийный WAV">
+      <button id="sunosaver-download-wav-btn" class="sunosaver-btn" style="border-color: #06b6d4; background: linear-gradient(135deg, #0e7490 0%, #0f172a 100%);" title="Download uncompressed 48kHz studio WAV (PRO)">
         🎵 WAV
       </button>
-      <button id="sunosaver-tg-btn" class="sunosaver-btn" style="border-color: #8b5cf6; background: linear-gradient(135deg, #2e1065 0%, #0f172a 100%);" title="Открыть в боте (Вокал, Минус, Видео)">
-        🎙 Вокал
+      <button id="sunosaver-tg-btn" class="sunosaver-btn" style="border-color: #8b5cf6; background: linear-gradient(135deg, #2e1065 0%, #0f172a 100%);" title="Open in Telegram Bot (Vocals, Karaoke, Video)">
+        🎙 Vocals
       </button>
     </div>
   `;
@@ -120,7 +120,7 @@ function injectFloatingDownloadButton() {
       await downloadSunoTrack(uuid, titleText, "Suno AI", "mp3");
       btn.classList.remove("loading");
       btn.classList.add("success");
-      btn.textContent = "✅ Скачано!";
+      btn.textContent = "✅ Saved!";
       setTimeout(() => {
         btn.classList.remove("success");
         btn.innerHTML = `
@@ -133,9 +133,13 @@ function injectFloatingDownloadButton() {
         `;
       }, 3000);
     } catch (err) {
-      console.error("[SunoSaver] Download error:", err);
+      console.warn("[SunoSaver] Download error:", err);
       btn.classList.remove("loading");
-      window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
+      if (err.message && (err.message.includes("limit") || err.message.includes("PRO"))) {
+        alert(err.message);
+      } else {
+        window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
+      }
     }
   });
 
@@ -149,15 +153,19 @@ function injectFloatingDownloadButton() {
       await downloadSunoTrack(uuid, titleText, "Suno AI", "wav");
       btn.classList.remove("loading");
       btn.classList.add("success");
-      btn.textContent = "✅ WAV готов!";
+      btn.textContent = "✅ WAV Saved!";
       setTimeout(() => {
         btn.classList.remove("success");
         btn.textContent = "🎵 WAV";
       }, 3000);
     } catch (err) {
-      console.error("[SunoSaver] WAV error:", err);
+      console.warn("[SunoSaver] WAV error:", err);
       btn.classList.remove("loading");
-      window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
+      if (err.message && (err.message.includes("limit") || err.message.includes("PRO"))) {
+        alert(err.message);
+      } else {
+        window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
+      }
     }
   });
 

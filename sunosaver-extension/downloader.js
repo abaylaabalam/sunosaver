@@ -2,9 +2,12 @@
  * SunoSaver Core Downloader Engine
  * Decrypts Suno AES-CTR audio streams, decodes via Web Audio API,
  * and encodes to standard MP3 (via lamejs) or lossless PCM WAV.
+ * Includes Daily Limits (10 tracks/day Free) & PRO License Manager.
  */
 
 const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const FREE_DAILY_LIMIT = 10;
+const DEV_MASTER_KEY = "SUNO-VIP-PRO-2026";
 
 function extractUUID(str) {
   if (!str) return null;
@@ -17,6 +20,118 @@ function b64ToUint8Array(b64) {
   const arr = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return arr;
+}
+
+/**
+ * Subscription & Usage Manager
+ */
+async function getSubscriptionStatus() {
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.sync) {
+      const syncData = await chrome.storage.sync.get(["isPro", "licenseKey"]);
+      if (syncData && syncData.isPro) {
+        return { isPro: true, licenseKey: syncData.licenseKey };
+      }
+    }
+  } catch (e) {}
+
+  const today = new Date().toISOString().slice(0, 10);
+  let count = 0;
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      const localData = await chrome.storage.local.get(["usageDate", "downloadCount"]);
+      if (localData && localData.usageDate === today) {
+        count = localData.downloadCount || 0;
+      } else {
+        await chrome.storage.local.set({ usageDate: today, downloadCount: 0 });
+      }
+    }
+  } catch (e) {}
+
+  return {
+    isPro: false,
+    remaining: Math.max(0, FREE_DAILY_LIMIT - count),
+    used: count,
+    limit: FREE_DAILY_LIMIT
+  };
+}
+
+async function recordDownloadUsage() {
+  const status = await getSubscriptionStatus();
+  if (status.isPro) return true;
+
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      const localData = await chrome.storage.local.get(["usageDate", "downloadCount"]);
+      let count = 0;
+      if (localData && localData.usageDate === today) {
+        count = localData.downloadCount || 0;
+      }
+      count++;
+      await chrome.storage.local.set({ usageDate: today, downloadCount: count });
+    }
+  } catch (e) {}
+  return true;
+}
+
+async function canDownload(format = "mp3") {
+  const status = await getSubscriptionStatus();
+  if (status.isPro) return { allowed: true, isPro: true };
+
+  if (format === "wav") {
+    return {
+      allowed: false,
+      reason: "wav_pro_only",
+      message: "Studio WAV (Lossless) is a PRO feature. Upgrade to PRO to unlock uncompressed audio!"
+    };
+  }
+
+  if (status.remaining <= 0) {
+    return {
+      allowed: false,
+      reason: "limit_reached",
+      message: `You have reached your daily limit of ${FREE_DAILY_LIMIT} free tracks. Upgrade to PRO for unlimited downloads!`
+    };
+  }
+
+  return { allowed: true, isPro: false, remaining: status.remaining };
+}
+
+async function activateLicenseKey(key) {
+  const cleanKey = (key || "").trim();
+  if (!cleanKey) {
+    throw new Error("Please enter a license key.");
+  }
+
+  // Developer / Admin bypass test key
+  if (cleanKey.toUpperCase() === DEV_MASTER_KEY) {
+    await chrome.storage.sync.set({ isPro: true, licenseKey: cleanKey });
+    return { success: true, message: "PRO activated successfully!" };
+  }
+
+  // Lemon Squeezy License Validation API
+  try {
+    const resp = await fetch("https://api.lemonsqueezy.com/v1/licenses/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ license_key: cleanKey })
+    });
+
+    if (!resp.ok) {
+      throw new Error(`Validation server returned HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    if (data.valid) {
+      await chrome.storage.sync.set({ isPro: true, licenseKey: cleanKey });
+      return { success: true, message: "PRO activated successfully!" };
+    } else {
+      throw new Error(data.error || "Invalid or expired license key.");
+    }
+  } catch (err) {
+    throw new Error(err.message || "License validation failed. Please check your internet connection.");
+  }
 }
 
 /**
@@ -119,9 +234,15 @@ function encodeAudioBufferToWav(buffer) {
 
 /**
  * Main Download Function:
- * Decrypts Suno AES-CTR -> Decodes to AudioBuffer -> Encodes to MP3 or WAV
+ * Enforces limits -> Decrypts Suno AES-CTR -> Decodes to AudioBuffer -> Encodes to MP3 or WAV -> Records usage
  */
 async function downloadSunoTrack(uuid, fallbackTitle, fallbackAuthor, format = "mp3") {
+  // Check daily limit or PRO feature access
+  const check = await canDownload(format);
+  if (!check.allowed) {
+    throw new Error(check.message);
+  }
+
   let title = fallbackTitle || "Suno Track";
   let author = fallbackAuthor || "Suno AI";
 
@@ -234,5 +355,9 @@ async function downloadSunoTrack(uuid, fallbackTitle, fallbackAuthor, format = "
   document.body.removeChild(a);
 
   setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+
+  // Record successful usage
+  await recordDownloadUsage();
+
   return { success: true, filename: filename };
 }

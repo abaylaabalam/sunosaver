@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -17,65 +17,83 @@
           <div class="brand-subtitle">AI Music & Stems Downloader</div>
         </div>
       </div>
-      <a href="https://t.me/sunosaver_bot" target="_blank" class="tg-badge" title="Открыть бота">
-        <span>@sunosaver_bot</span>
-      </a>
+      <div id="plan-badge" class="plan-badge badge-free">Free: 10/10</div>
     </header>
 
     <!-- Detected Song Card -->
     <div id="track-card" class="track-card">
-      <div class="track-badge">Текущий трек</div>
-      <div id="track-title" class="track-title">Загрузка информации...</div>
+      <div class="track-badge">Now Playing</div>
+      <div id="track-title" class="track-title">Loading track info...</div>
       <div id="track-author" class="track-author">Suno Creator</div>
       
       <div class="actions-grid">
-        <button id="btn-download-mp3" class="btn btn-primary" title="Скачать качественный MP3 с длительностью">
+        <button id="btn-download-mp3" class="btn btn-primary" title="Download standard high quality MP3">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          Скачать MP3
+          Download MP3
         </button>
 
-        <button id="btn-download-wav" class="btn btn-wav" title="Скачать студийный несжатый WAV">
-          <span>🎵</span> Скачать WAV
+        <button id="btn-download-wav" class="btn btn-wav" title="Download uncompressed studio WAV">
+          <span>🎵 WAV</span>
+          <span class="pro-tag">PRO</span>
         </button>
       </div>
 
-      <button id="btn-stems" class="btn btn-secondary" style="width: 100%; margin-top: 4px;" title="Разделить на вокал и минус в боте">
-        <span>🎙</span> Вокал и Минус (в боте)
+      <!-- Free Daily Limit Progress Bar -->
+      <div id="usage-box" class="usage-box">
+        <div class="usage-labels">
+          <span>Daily Free Downloads</span>
+          <span id="usage-text">0 / 10</span>
+        </div>
+        <div class="progress-track">
+          <div id="progress-fill" class="progress-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <button id="btn-stems" class="btn btn-secondary" style="width: 100%; margin-top: 4px;" title="Separate into vocals and backing track via AI">
+        <span>🎙</span> Vocals & Instrumental (AI)
       </button>
     </div>
 
     <!-- Empty State (When no track detected) -->
     <div id="no-track-card" class="no-track-card" style="display: none;">
       <div class="no-track-icon">🎧</div>
-      <div class="no-track-text">Откройте любую песню или плейлист на <b>suno.com</b> для мгновенного скачивания!</div>
-      <a href="https://suno.com" target="_blank" class="btn btn-outline">Перейти на Suno.com</a>
+      <div class="no-track-text">Open any track or playlist on <b>suno.com</b> for instant 1-click download!</div>
+      <a href="https://suno.com" target="_blank" class="btn btn-outline">Go to Suno.com</a>
     </div>
 
-    <!-- Features & Bot Gateway -->
-    <div class="features-box">
-      <div class="feature-item">
-        <span class="feature-icon">✨</span>
-        <div class="feature-text">
-          <b>Lossless WAV & Видео</b>
-          <span>Студийное качество без потерь</span>
+    <!-- PRO Upgrade Card -->
+    <div id="pro-upgrade-card" class="pro-card">
+      <div class="pro-header">
+        <span class="pro-icon">👑</span>
+        <div>
+          <div class="pro-title">Upgrade to SunoSaver PRO</div>
+          <div class="pro-desc">Unlimited downloads & Lossless studio WAV</div>
         </div>
       </div>
-      <div class="feature-item">
-        <span class="feature-icon">📦</span>
-        <div class="feature-text">
-          <b>Плейлисты в ZIP</b>
-          <span>Скачивание целых альбомов</span>
+      <a href="https://lemonsqueezy.com" target="_blank" id="btn-buy-pro" class="btn btn-pro">
+        Get Unlimited Access
+      </a>
+      <div class="license-toggle" id="toggle-license">Have a license key? Enter here</div>
+      <div id="license-section" class="license-section" style="display: none;">
+        <div class="license-input-row">
+          <input type="text" id="license-input" placeholder="Paste license key..." class="license-input">
+          <button id="btn-activate-license" class="btn btn-activate">Activate</button>
         </div>
+        <div id="license-msg" class="license-msg"></div>
       </div>
-      <div class="feature-item">
-        <span class="feature-icon">🔍</span>
-        <div class="feature-text">
-          <b>Инлайн-поиск</b>
-          <span>@sunosaver_bot в любом чате</span>
+    </div>
+
+    <!-- PRO Active Banner (Shown when PRO is unlocked) -->
+    <div id="pro-active-card" class="pro-active-card" style="display: none;">
+      <div class="pro-active-content">
+        <span style="font-size: 18px;">👑</span>
+        <div>
+          <b>PRO Lifetime Active</b>
+          <div style="font-size: 10px; color: #94a3b8;">Unlimited MP3 + Lossless WAV enabled</div>
         </div>
       </div>
     </div>
@@ -83,10 +101,10 @@
     <!-- Footer Action -->
     <footer class="footer">
       <button id="btn-open-bot" class="btn btn-telegram">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
         </svg>
-        Открыть Telegram-бота
+        Open Telegram Bot (Stems & Video)
       </button>
     </footer>
   </div>
