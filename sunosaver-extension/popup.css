@@ -39,13 +39,9 @@ body {
 .logo-icon {
   width: 32px;
   height: 32px;
-  background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.35);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.35);
+  object-fit: cover;
 }
 
 .brand-title {
