@@ -4,6 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const trackTitle = document.getElementById("track-title");
   const trackAuthor = document.getElementById("track-author");
   const btnDownloadMp3 = document.getElementById("btn-download-mp3");
+  const btnDownloadWav = document.getElementById("btn-download-wav");
   const btnStems = document.getElementById("btn-stems");
   const btnOpenBot = document.getElementById("btn-open-bot");
 
@@ -32,12 +33,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const tab = tabs[0];
       if (tab && tab.url && (tab.url.includes("suno.com") || tab.url.includes("suno.ai"))) {
-        const match = tab.url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+        const uuid = extractUUID(tab.url);
         const title = tab.title ? tab.title.replace(" | Suno", "").trim() : "Suno Track";
 
-        if (match) {
+        if (uuid) {
           displayTrack({
-            uuid: match[0],
+            uuid: uuid,
             title: title,
             author: "Suno Creator",
             tabId: tab.id
@@ -67,73 +68,61 @@ document.addEventListener("DOMContentLoaded", () => {
     showNoTrack();
   }
 
-  // Handle Download Click
-  btnDownloadMp3.addEventListener("click", () => {
+  // Helper for download execution (runs directly in popup using downloader.js)
+  async function triggerDownload(format = "mp3") {
     if (!activeTrack || !activeTrack.uuid) return;
-    btnDownloadMp3.textContent = "⏳ Конвертация MP3...";
-    btnDownloadMp3.disabled = true;
 
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const activeTab = tabs && tabs[0];
-      if (activeTab && activeTab.id) {
-        chrome.tabs.sendMessage(
-          activeTab.id,
-          {
-            action: "download_current_page_track",
-            uuid: activeTrack.uuid,
-            title: activeTrack.title,
-            author: activeTrack.author,
-            format: "mp3"
-          },
-          (res) => {
-            btnDownloadMp3.disabled = false;
-            const err = chrome.runtime.lastError;
-            if (err || !res || !res.success) {
-              // Page may need a refresh after extension update -> redirect to bot
-              btnDownloadMp3.textContent = "🤖 В Telegram...";
-              setTimeout(() => {
-                chrome.tabs.create({ url: `https://t.me/sunosaver_bot?start=dl_${activeTrack.uuid}` });
-                btnDownloadMp3.innerHTML = `
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                  </svg>
-                  Скачать MP3
-                `;
-              }, 600);
-            } else {
-              btnDownloadMp3.textContent = "✅ Скачано!";
-              setTimeout(() => {
-                btnDownloadMp3.innerHTML = `
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                  </svg>
-                  Скачать MP3
-                `;
-              }, 2500);
-            }
-          }
-        );
+    const targetBtn = format === "wav" ? btnDownloadWav : btnDownloadMp3;
+    const originalText = targetBtn.innerHTML;
+    targetBtn.disabled = true;
+    targetBtn.textContent = format === "wav" ? "⏳ WAV..." : "⏳ MP3...";
+
+    try {
+      if (typeof downloadSunoTrack === "function") {
+        await downloadSunoTrack(activeTrack.uuid, activeTrack.title, activeTrack.author, format);
+        targetBtn.textContent = format === "wav" ? "✅ WAV готов!" : "✅ Скачано!";
+        setTimeout(() => {
+          targetBtn.disabled = false;
+          targetBtn.innerHTML = originalText;
+        }, 3000);
       } else {
-        btnDownloadMp3.disabled = false;
-        chrome.tabs.create({ url: `https://t.me/sunosaver_bot?start=dl_${activeTrack.uuid}` });
+        throw new Error("downloader not loaded");
       }
-    });
-  });
+    } catch (err) {
+      console.warn(`[SunoSaver] Direct popup download failed, opening Telegram fallback:`, err);
+      targetBtn.textContent = "🤖 В Telegram...";
+      setTimeout(() => {
+        targetBtn.disabled = false;
+        targetBtn.innerHTML = originalText;
+        chrome.tabs.create({ url: `https://t.me/sunosaver_bot?start=dl_${activeTrack.uuid}` });
+      }, 500);
+    }
+  }
+
+  // Hook MP3 Download
+  if (btnDownloadMp3) {
+    btnDownloadMp3.addEventListener("click", () => triggerDownload("mp3"));
+  }
+
+  // Hook WAV Download
+  if (btnDownloadWav) {
+    btnDownloadWav.addEventListener("click", () => triggerDownload("wav"));
+  }
 
   // Handle Stems / Karaoke (Opens bot with deeplink)
-  btnStems.addEventListener("click", () => {
-    const url = activeTrack && activeTrack.uuid 
-      ? `https://t.me/sunosaver_bot?start=dl_${activeTrack.uuid}` 
-      : "https://t.me/sunosaver_bot";
-    chrome.tabs.create({ url });
-  });
+  if (btnStems) {
+    btnStems.addEventListener("click", () => {
+      const url = activeTrack && activeTrack.uuid 
+        ? `https://t.me/sunosaver_bot?start=dl_${activeTrack.uuid}` 
+        : "https://t.me/sunosaver_bot";
+      chrome.tabs.create({ url });
+    });
+  }
 
   // Handle Open Bot
-  btnOpenBot.addEventListener("click", () => {
-    chrome.tabs.create({ url: "https://t.me/sunosaver_bot" });
-  });
+  if (btnOpenBot) {
+    btnOpenBot.addEventListener("click", () => {
+      chrome.tabs.create({ url: "https://t.me/sunosaver_bot" });
+    });
+  }
 });

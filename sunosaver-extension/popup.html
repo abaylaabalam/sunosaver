@@ -29,19 +29,23 @@
       <div id="track-author" class="track-author">Suno Creator</div>
       
       <div class="actions-grid">
-        <button id="btn-download-mp3" class="btn btn-primary">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <button id="btn-download-mp3" class="btn btn-primary" title="Скачать качественный MP3 с длительностью">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          Скачать MP3 (320k)
+          Скачать MP3
         </button>
 
-        <button id="btn-stems" class="btn btn-secondary">
-          <span>🎙</span> Вокал и Минус
+        <button id="btn-download-wav" class="btn btn-wav" title="Скачать студийный несжатый WAV">
+          <span>🎵</span> Скачать WAV
         </button>
       </div>
+
+      <button id="btn-stems" class="btn btn-secondary" style="width: 100%; margin-top: 4px;" title="Разделить на вокал и минус в боте">
+        <span>🎙</span> Вокал и Минус (в боте)
+      </button>
     </div>
 
     <!-- Empty State (When no track detected) -->
@@ -57,7 +61,7 @@
         <span class="feature-icon">✨</span>
         <div class="feature-text">
           <b>Lossless WAV & Видео</b>
-          <span>Студийное качество для сведения</span>
+          <span>Студийное качество без потерь</span>
         </div>
       </div>
       <div class="feature-item">
@@ -87,6 +91,8 @@
     </footer>
   </div>
 
+  <script src="lib/lame.min.js"></script>
+  <script src="downloader.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
