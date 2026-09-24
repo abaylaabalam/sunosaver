@@ -1,6 +1,6 @@
 # Политика конфиденциальности / Privacy Policy
-**Сервис:** Telegram-бот SunoSaver ([@sunosaver_bot](https://t.me/sunosaver_bot))  
-**Дата последнего обновления:** 17 сентября 2026 г.  
+**Продукт:** SunoSaver (Telegram-бот & Chrome Extension)  
+**Дата последнего обновления:** 24 сентября 2026 г.  
 
 ---
 
@@ -71,7 +71,16 @@
 ### 7. Контакты и обратная связь
 Если у вас есть вопросы, предложения или претензии относительно настоящей Политики:
 - **Telegram для связи:** [@youtubestanmanager](https://t.me/youtubestanmanager)
-- **Официальный канал проекта:** [@youtubestantg](https://t.me/youtubestantg)
+---
+
+### 8. Браузерное расширение SunoSaver (Chrome Extension)
+1. **Локальное хранение:** Расширение использует локальное хранилище браузера (`chrome.storage.local`) исключительно для сохранения счётчика скачиваний за текущий день (лимит 10 треков/день) и пользовательского лицензионного ключа PRO.
+2. **Сетевые запросы:** Расширение связывается только с серверами Suno (`suno.com`, `suno.ai`, CDN `cloudfront.net`) для загрузки аудиопотока и с API платёжной системы Lemon Squeezy для валидации лицензии.
+3. **Отсутствие трекинга:** Мы не собираем историю браузера, персональные данные, пароли, куки или телеметрию. Расширение активно только на страницах Suno.
+4. **Разрешения (Permissions):** 
+   - `storage`: локальное сохранение лимитов и ключа;
+   - `downloads`: сохранение скачанных треков на диск пользователя;
+   - `tabs` / `activeTab`: определение текущего трека на открытой вкладке Suno.
 
 ---
 ---
@@ -144,3 +153,14 @@ To request account deletion, contact our support team at **[@youtubestanmanager]
 For inquiries, suggestions, or privacy concerns:
 - **Support Contact:** [@youtubestanmanager](https://t.me/youtubestanmanager)
 - **Official Channel:** [@youtubestantg](https://t.me/youtubestantg)
+
+---
+
+### 8. SunoSaver Chrome Extension
+1. **Local Storage:** The extension uses `chrome.storage.local` solely to track daily free download counts (10 tracks/day limit) and the user's PRO license key.
+2. **Network Requests:** The extension only connects to Suno (`suno.com`, `suno.ai`, CDN `cloudfront.net`) to stream audio files, and Lemon Squeezy's official API to validate PRO licenses.
+3. **No Tracking or Spyware:** We do not collect, track, or transmit your browser history, personal identity, passwords, or cookies. The extension only runs on Suno web pages.
+4. **Permissions Justification:**
+   - `storage`: saves download limits and license key locally on your device.
+   - `downloads`: saves converted MP3/WAV files to your machine.
+   - `tabs` / `activeTab`: detects the current song on the active Suno tab.
