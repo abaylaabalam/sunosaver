@@ -135,8 +135,11 @@ function injectFloatingDownloadButton() {
     } catch (err) {
       console.warn("[SunoSaver] Download error:", err);
       btn.classList.remove("loading");
+      const checkoutUrl = "https://sunosaver.lemonsqueezy.com/checkout/buy/de07e7c1-fbbc-439b-a989-22de949ad0bf";
       if (err.message && (err.message.includes("limit") || err.message.includes("PRO"))) {
-        alert(err.message);
+        if (confirm(err.message + "\n\nWould you like to upgrade to PRO now for unlimited access & studio WAV?")) {
+          window.open(checkoutUrl, "_blank");
+        }
       } else {
         window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
       }
@@ -161,8 +164,11 @@ function injectFloatingDownloadButton() {
     } catch (err) {
       console.warn("[SunoSaver] WAV error:", err);
       btn.classList.remove("loading");
+      const checkoutUrl = "https://sunosaver.lemonsqueezy.com/checkout/buy/de07e7c1-fbbc-439b-a989-22de949ad0bf";
       if (err.message && (err.message.includes("limit") || err.message.includes("PRO"))) {
-        alert(err.message);
+        if (confirm(err.message + "\n\nWould you like to upgrade to PRO now for studio lossless WAV?")) {
+          window.open(checkoutUrl, "_blank");
+        }
       } else {
         window.open(`https://t.me/sunosaver_bot?start=dl_${uuid}`, "_blank");
       }

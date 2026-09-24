@@ -114,11 +114,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Check permissions / limits
     const check = await canDownload(format);
     if (!check.allowed) {
+      const checkoutUrl = "https://sunosaver.lemonsqueezy.com/checkout/buy/de07e7c1-fbbc-439b-a989-22de949ad0bf";
       if (check.reason === "wav_pro_only") {
         if (licenseSection) licenseSection.style.display = "block";
-        alert("⭐️ Studio WAV is a PRO feature. Enter your PRO license or upgrade below to unlock!");
+        if (confirm("⭐️ Studio Lossless WAV (48kHz) is a PRO feature.\n\nWould you like to upgrade to PRO now?")) {
+          chrome.tabs.create({ url: checkoutUrl });
+        }
       } else {
-        alert(check.message);
+        if (confirm(check.message + "\n\nWould you like to upgrade to PRO now for unlimited downloads?")) {
+          chrome.tabs.create({ url: checkoutUrl });
+        }
       }
       return;
     }
