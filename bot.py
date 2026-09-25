@@ -271,6 +271,18 @@ async def edit_or_send_status(status_msg: types.Message | None, chat_id: int, te
         logger.warning("Не удалось отправить статус-сообщение: %s", e)
         return None
 
+
+def clean_for_header(text: str | None, max_len: int = 120, fallback: str = "Suno Track") -> str:
+    """Очищает строку от запрещённых символов файловой системы и управляющих символов (\n, \r, \t, etc.),
+    предотвращая ошибку 'Forbidden control character detected in headers' при формировании multipart заголовков Telegram."""
+    if not text:
+        return fallback
+    cleaned = re.sub(r'[\r\n\t\x00-\x1f\x7f-\x9f]+', ' ', str(text))
+    cleaned = re.sub(r'[\\/*?:"<>|]', '', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned[:max_len].strip() or fallback
+
+
 # ─── Глобальные объекты (создаются внутри main() после старта event loop) ──────
 SEMAPHORE:    asyncio.Semaphore    | None = None
 HTTP_SESSION: aiohttp.ClientSession | None = None
@@ -1884,9 +1896,9 @@ async def _download_and_send(
             cached_title = cache_data[1]
             cached_lyrics = cache_data[2]
             cached_artist = cache_data[3] if len(cache_data) > 3 else None
-            safe_title = cached_title or "Suno Track"
+            safe_title = clean_for_header(cached_title, fallback="Suno Track")
             escaped_title = html.escape(safe_title)
-            artist = custom_artist or cached_artist or "Suno AI (@sunosaver_bot)"
+            artist = clean_for_header(custom_artist or cached_artist, max_len=80, fallback="Suno AI (@sunosaver_bot)")
             escaped_artist = html.escape(artist)
             caption = f"🎵 <b>{escaped_title}</b>\n{t['artist_label']}: {escaped_artist}"
             logger.info("Из кэша: %s", song_id)
@@ -1996,9 +2008,9 @@ async def _download_and_send(
             pass
 
         # ── Формирование файла ────────────────────────────────────────────────
-        safe_title     = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
+        safe_title     = clean_for_header(title, fallback="Suno Track")
         escaped_title  = html.escape(safe_title)
-        artist         = custom_artist or author or "Suno AI (@sunosaver_bot)"
+        artist         = clean_for_header(custom_artist or author, max_len=80, fallback="Suno AI (@sunosaver_bot)")
         escaped_artist = html.escape(artist)
         tagged_audio, duration_sec = add_id3_tags(raw_audio, safe_title, artist, image_bytes=image_bytes)
         audio_file     = BufferedInputFile(tagged_audio, filename=f"{safe_title}.mp3")
@@ -4473,11 +4485,11 @@ async def handle_wav_callback(callback: CallbackQuery):
     cached_wav_fid = await database.get_cached_wav(song_id)
     cached_track = await database.get_cached_track(song_id)
     title = cached_track[1] if cached_track and cached_track[1] else "Suno Track"
-    safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
+    safe_title = clean_for_header(title, fallback="Suno Track")
     escaped_title = html.escape(safe_title)
     custom_artist = await database.get_user_custom_artist(user_id)
     cached_artist = cached_track[3] if cached_track and len(cached_track) > 3 and cached_track[3] else None
-    artist = custom_artist or cached_artist or "Suno AI (@sunosaver_bot)"
+    artist = clean_for_header(custom_artist or cached_artist, max_len=80, fallback="Suno AI (@sunosaver_bot)")
     escaped_artist = html.escape(artist)
     caption = f"🎼 <b>{escaped_title} (WAV)</b>\n{t['artist_label']}: {escaped_artist}"
 
@@ -4543,7 +4555,7 @@ async def handle_wav_callback(callback: CallbackQuery):
             return
 
         if extracted_title and extracted_title != "Suno Track":
-            safe_title = re.sub(r'[\\/*?:"<>|]', "", extracted_title).strip() or safe_title
+            safe_title = clean_for_header(extracted_title, fallback=safe_title)
             escaped_title = html.escape(safe_title)
             caption = f"🎼 <b>{escaped_title} (WAV)</b>\n{t['artist_label']}: {escaped_artist}"
 
@@ -4890,7 +4902,7 @@ async def handle_video_callback(callback: CallbackQuery):
     cached_video_fid = await database.get_cached_video(song_id)
     cached_track = await database.get_cached_track(song_id)
     title = cached_track[1] if cached_track and cached_track[1] else "Suno Track"
-    safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
+    safe_title = clean_for_header(title, fallback="Suno Track")
     escaped_title = html.escape(safe_title)
     caption = f"🎬 <b>{escaped_title}</b>\n⚡️ @sunosaver_bot"
 
@@ -4949,7 +4961,7 @@ async def handle_video_callback(callback: CallbackQuery):
             return
 
         if extracted_title and extracted_title != "Suno Track":
-            safe_title = re.sub(r'[\\/*?:"<>|]', "", extracted_title).strip() or safe_title
+            safe_title = clean_for_header(extracted_title, fallback=safe_title)
             escaped_title = html.escape(safe_title)
             caption = f"🎬 <b>{escaped_title}</b>\n⚡️ @sunosaver_bot"
 
@@ -5087,9 +5099,10 @@ async def handle_stems_callback(callback: CallbackQuery):
     # Получаем метаданные трека из кэша
     cached_track = await database.get_cached_track(song_id)
     title = cached_track[1] if cached_track and cached_track[1] else "Suno Track"
-    safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "Suno Track"
+    safe_title = clean_for_header(title, fallback="Suno Track")
     escaped_title = html.escape(safe_title)
-    artist = (cached_track[3] if cached_track and len(cached_track) > 3 and cached_track[3] else None) or "Suno AI (@sunosaver_bot)"
+    raw_artist = (cached_track[3] if cached_track and len(cached_track) > 3 and cached_track[3] else None) or "Suno AI (@sunosaver_bot)"
+    artist = clean_for_header(raw_artist, max_len=80, fallback="Suno AI (@sunosaver_bot)")
     escaped_artist = html.escape(artist)
 
     # 1. Проверяем кэш стемов
