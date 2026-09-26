@@ -30,6 +30,7 @@ from aiogram.exceptions import (
     TelegramAPIError,
     TelegramEntityTooLarge,
     TelegramBadRequest,
+    TelegramNetworkError,
 )
 from aiogram.types import (
     BufferedInputFile,
@@ -136,7 +137,7 @@ async def notify_admin_error(
     if not ADMIN_ID:
         return
 
-    if isinstance(error, (TrackNotFoundError, TrackStillProcessingError, WavTooLargeError, TelegramForbiddenError)):
+    if isinstance(error, (TrackNotFoundError, TrackStillProcessingError, WavTooLargeError, TelegramForbiddenError, TelegramNetworkError)):
         return
 
     if "bot was blocked by the user" in str(error).lower():
@@ -207,6 +208,12 @@ async def send_audio_safe(chat_id: int, message: types.Message | None = None, **
                 else:
                     raise
         return await bot.send_audio(chat_id=chat_id, **kwargs)
+    except TelegramNetworkError as net_err:
+        logger.warning("TelegramNetworkError в send_audio_safe, повтор через 1.5с: %s", net_err)
+        await asyncio.sleep(1.5)
+        clean_kwargs = dict(kwargs)
+        clean_kwargs["request_timeout"] = max(clean_kwargs.get("request_timeout", 60), 120)
+        return await bot.send_audio(chat_id=chat_id, **clean_kwargs)
     except TelegramBadRequest as t_err:
         if "can't parse entities" in str(t_err).lower() and kwargs.get("parse_mode"):
             logger.warning("Ошибка парсинга HTML в send_audio_safe, повтор без HTML-разметки: %s", t_err)
@@ -2021,31 +2028,19 @@ async def _download_and_send(
         reply_markup   = get_track_inline_keyboard(lang, song_id, show_donate=show_donate)
 
         # ── Отправка ──────────────────────────────────────────────────────────
-        try:
-            sent_msg = await message.answer_audio(
-                audio=audio_file,
-                thumbnail=thumb_file,
-                caption=caption,
-                title=safe_title,
-                performer=artist,
-                duration=duration_sec if duration_sec > 0 else None,
-                reply_markup=reply_markup,
-                parse_mode="HTML",
-            )
-        except TelegramBadRequest as tb_err:
-            if "can't parse entities" in str(tb_err).lower():
-                clean_caption = f"🎵 {safe_title}\n{t.get('artist_label', 'Author')}: {artist}"
-                sent_msg = await message.answer_audio(
-                    audio=audio_file,
-                    thumbnail=thumb_file,
-                    caption=clean_caption,
-                    title=safe_title,
-                    performer=artist,
-                    duration=duration_sec if duration_sec > 0 else None,
-                    reply_markup=reply_markup,
-                )
-            else:
-                raise
+        sent_msg = await send_audio_safe(
+            chat_id=message.chat.id,
+            message=message,
+            audio=audio_file,
+            thumbnail=thumb_file,
+            caption=caption,
+            title=safe_title,
+            performer=artist,
+            duration=duration_sec if duration_sec > 0 else None,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+            request_timeout=120,
+        )
 
         if sent_msg.audio:
             if song_id:
@@ -2075,6 +2070,14 @@ async def _download_and_send(
         return False
     except TelegramForbiddenError:
         logger.info("Пользователь %s заблокировал бота во время отправки трека", effective_user_id)
+        return False
+    except TelegramNetworkError as net_err:
+        logger.warning("Сетевой таймаут Telegram при отправке трека (%s): %s", suno_url, net_err)
+        try:
+            err_text = t.get("error_telegram_timeout", "⚠️ <b>Серверы Telegram временно не ответили вовремя.</b>\nПожалуйста, подождите 10–15 секунд и отправьте ссылку снова!") + t.get("error_contact", "")
+            await edit_or_send_status(status_msg, effective_user_id, err_text, parse_mode="HTML")
+        except Exception:
+            pass
         return False
     except Exception as e:
         logger.error("Ошибка пайплайна: %s", e, exc_info=True)
@@ -4280,7 +4283,7 @@ async def _pcm_to_wav(input_bytes: bytes) -> bytes | None:
         out_path = out_f.name
 
     try:
-        rates = ["48000", "44100", "32000", "24000", "22050", "16000"]
+        rates = ["48000", "44100", "32000", "24000", "22050", "16000", "11025", "8000"]
         for rate in rates:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y", "-i", in_path,
@@ -4302,7 +4305,7 @@ async def _pcm_to_wav(input_bytes: bytes) -> bytes | None:
         if os.path.exists(out_path):
             final_sz = os.path.getsize(out_path)
             if final_sz > 49 * 1024 * 1024:
-                logger.warning("WAV > 50MB (%s байт) даже при 16kHz", final_sz)
+                logger.warning("WAV > 50MB (%s байт) даже при 8kHz", final_sz)
                 raise WavTooLargeError(f"WAV exceeds 50 MB limit: {final_sz} bytes")
             elif 1000 < final_sz <= 50 * 1024 * 1024:
                 with open(out_path, "rb") as rf:
@@ -4428,6 +4431,8 @@ async def download_direct_wav_from_suno(
                                     if wav_out:
                                         logger.info("Конвертация в WAV успешна: %s байт", len(wav_out))
                                         return wav_out, title, uuid
+            except WavTooLargeError:
+                raise
             except Exception as e:
                 logger.warning("Mango rights не удался для %s: %s", uuid, e)
 
@@ -4446,6 +4451,8 @@ async def download_direct_wav_from_suno(
                                 if wav_out:
                                     logger.info("Конвертация в WAV через CDN fallback (%s) успешна: %s байт", fallback_url, len(wav_out))
                                     return wav_out, title, uuid
+                except WavTooLargeError:
+                    raise
                 except Exception:
                     pass
 
