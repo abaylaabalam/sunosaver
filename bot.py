@@ -5398,6 +5398,28 @@ async def handle_inline_query(inline_query: InlineQuery):
     lang = get_lang_fallback(inline_query.from_user)
     t = TEXTS.get(lang, TEXTS["ru"])
 
+    # Проверка подписки для инлайн-режима
+    if REQUIRED_CHANNEL and not (ADMIN_ID and user_id == ADMIN_ID):
+        is_sub = await check_user_subscription(user_id)
+        if not is_sub:
+            await inline_query.answer(
+                results=[
+                    InlineQueryResultArticle(
+                        id="sub_required_inline",
+                        title="⚠️ Требуется подписка на канал",
+                        description=f"Подпишитесь на {REQUIRED_CHANNEL}, чтобы использовать бота!",
+                        input_message_content=InputTextMessageContent(
+                            message_text=t["sub_required"],
+                            parse_mode="HTML"
+                        ),
+                        reply_markup=get_sub_keyboard(lang),
+                    )
+                ],
+                cache_time=10,
+                is_personal=True,
+            )
+            return
+
     tracks = await database.search_cached_tracks(user_id=user_id, query=query, limit=25)
 
     results = []
