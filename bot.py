@@ -361,13 +361,20 @@ TEXTS = {
             f"🔒 <b>Конфиденциальность:</b> /privacy"
         ),
         "privacy": (
-            "🔒 <b>Политика конфиденциальности SunoSaver</b>\n\n"
-            "Мы уважительно относимся к вашей приватности и строго следуем принципу минимизации данных:\n\n"
-            "• <b>Что мы сохраняем:</b> ваш числовой Telegram ID, имя/username, выбранный язык, личную библиотеку треков и счётчики скачиваний для соблюдения лимитов Fair Use.\n"
-            "• <b>Что мы НЕ собираем:</b> бот не имеет доступа к вашим личным сообщениям, банковским картам и аккаунтам Suno. Все донаты звёздами обрабатываются безопасно платформой Telegram.\n"
-            "• <b>Временные файлы:</b> все треки, стемы и видео удаляются с нашего сервера сразу после отправки вам в чат.\n"
-            "• <b>Удаление данных:</b> вы имеете право на полное забвение. Для безвозвратного удаления вашего профиля напишите в поддержку: @youtubestanmanager.\n\n"
-            "📄 <i>Мы никогда не продаём и не передаём ваши данные третьим лицам или рекламным сетям.</i>"
+            "🔒 <b>Политика сервиса и конфиденциальность SunoSaver</b>\n\n"
+            "<b>1. Конфиденциальность и данные:</b>\n"
+            "• Мы сохраняем только числовой Telegram ID, username, выбранный язык, личную библиотеку кэша и счётчики для соблюдения лимитов Fair Use.\n"
+            "• Бот не имеет доступа к личным перепискам, платёжным картам и паролям Suno. Все донаты звёздами обрабатываются платформой Telegram.\n"
+            "• Временные медиафайлы удаляются с сервера сразу после отправки вам в чат.\n\n"
+            "<b>2. Реферальная программа и статус PRO:</b>\n"
+            "• В зачёт идут исключительно <b>новые пользователи</b>, ранее никогда не запускавшие бота.\n"
+            "• Повторные переходы, саморефералы и любые попытки искусственной накрутки автоматически отклоняются системой защиты (антифрод).\n"
+            "• В случае технических задержек статус верифицируется поддержкой в спокойном штатном порядке.\n\n"
+            "<b>3. Регламент обращений и культура общения:</b>\n"
+            "• Сервис предоставляется на бесплатной основе. Общение со службой поддержки (@youtubestanmanager) строится исключительно на принципах вежливости и взаимного уважения.\n"
+            "• <b>Категорически запрещены:</b> угрозы, шантаж, оскорбления, необоснованные обвинения и ультиматумы.\n"
+            "• При проявлении агрессии или попытках давления администрация оставляет за собой право немедленно прекратить коммуникацию и <b>навсегда заблокировать аккаунт нарушителя (/ban)</b> без права восстановления доступа.\n\n"
+            "📄 <i>Используя бота, вы подтверждаете полное согласие с данными правилами.</i>"
         ),
         "settings":      "⚙️ <b>Настройки интерфейса</b>\n\nВыберите язык:",
         "lang_changed":  "✅ Язык переключен на <b>Русский</b>!",
@@ -473,7 +480,8 @@ TEXTS = {
             "✅ Миксы до 10 песен в один сет\n"
             "✅ Безлимитный студийный WAV (30-50 МБ)\n"
             "✅ Приоритетная скорость обработки\n\n"
-            "🔗 <b>Ваша ссылка для приглашения:</b>\n<code>{ref_url}</code>"
+            "🔗 <b>Ваша ссылка для приглашения:</b>\n<code>{ref_url}</code>\n\n"
+            "📌 <i>Правила: засчитываются только новые пользователи. За попытки накрутки, шантаж или хамство в поддержку — блокировка аккаунта (/privacy).</i>"
         ),
         "limit_downloads_reached": (
             "⚠️ <b>Дневной лимит исчерпан!</b>\n\n"
@@ -604,13 +612,20 @@ TEXTS = {
             f"🔒 <b>Privacy:</b> /privacy"
         ),
         "privacy": (
-            "🔒 <b>SunoSaver Privacy Policy</b>\n\n"
-            "We respect your privacy and adhere strictly to data minimization standards:\n\n"
-            "• <b>What we store:</b> your numeric Telegram ID, username, selected language, personal track library, and usage counters to enforce fair daily limits.\n"
-            "• <b>What we DO NOT collect:</b> we never access your personal messages, bank accounts, or Suno login credentials. All Stars donations are handled securely by Telegram.\n"
-            "• <b>Temporary files:</b> all processed audio, stems, and videos are permanently deleted from our server immediately after delivery to your chat.\n"
-            "• <b>Data erasure:</b> you have the right to be forgotten. To request full deletion of your user record, contact: @youtubestanmanager.\n\n"
-            "📄 <i>We never sell, rent, or transfer your personal data to third parties or advertising networks.</i>"
+            "🔒 <b>SunoSaver Terms & Privacy Policy</b>\n\n"
+            "<b>1. Data Privacy:</b>\n"
+            "• We only store your numeric Telegram ID, username, language, track library, and fair-use counters.\n"
+            "• We never access your private messages, cards, or Suno accounts. Telegram Stars payments are processed securely by Telegram.\n"
+            "• Temporary media files are deleted from our server immediately after delivery.\n\n"
+            "<b>2. Referral Program & PRO Status:</b>\n"
+            "• Only <b>genuinely new users</b> who have never launched the bot before count towards referrals.\n"
+            "• Duplicate accounts, self-referrals, and artificial manipulation are automatically rejected by anti-fraud filters.\n"
+            "• Any technical discrepancies are resolved via regular support inquiries in a standard workflow.\n\n"
+            "<b>3. Support Guidelines & Code of Conduct:</b>\n"
+            "• SunoSaver is provided free of charge. Communication with support (@youtubestanmanager) must remain respectful.\n"
+            "• <b>Strictly prohibited:</b> threats, blackmail, insults, aggressive ultimatums, and harassment.\n"
+            "• Hostile or abusive behavior results in immediate refusal of service and a <b>permanent ban (/ban)</b> from the bot with zero appeal.\n\n"
+            "📄 <i>By using SunoSaver, you agree to these terms and policies.</i>"
         ),
         "settings":      "⚙️ <b>Settings</b>\n\nChoose language:",
         "lang_changed":  "✅ Language changed to <b>English</b>!",
@@ -716,7 +731,8 @@ TEXTS = {
             "✅ Up to 10 tracks in a single mix\n"
             "✅ Unlimited studio lossless WAV (30-50 MB)\n"
             "✅ Priority queue\n\n"
-            "🔗 <b>Your invite link:</b>\n<code>{ref_url}</code>"
+            "🔗 <b>Your invite link:</b>\n<code>{ref_url}</code>\n\n"
+            "📌 <i>Rules: Only genuinely new users qualify. Threats, blackmail, or abusive conduct result in immediate permanent ban (/privacy).</i>"
         ),
         "limit_downloads_reached": (
             "⚠️ <b>Daily download limit reached!</b>\n\n"
@@ -847,13 +863,20 @@ TEXTS = {
             f"🔒 <b>Құпиялылық:</b> /privacy"
         ),
         "privacy": (
-            "🔒 <b>SunoSaver Құпиялылық саясаты</b>\n\n"
-            "Біз сіздің жеке ақпаратыңыздың құпиялылығын құрметтейміз және деректерді минималды жинау қағидасын ұстанамыз:\n\n"
-            "• <b>Біз нені сақтаймыз:</b> сандық Telegram ID, аты-жөніңіз/username, таңдалған тіл, жеке кітапхана және жүктеулер саны (Fair Use шектеулері үшін).\n"
-            "• <b>Біз нені ЖИНАМАЙМЫЗ:</b> бот сіздің жеке хаттарыңызға, банк карталарыңызға және Suno аккаунттарына кіре алмайды. Барлық Stars төлемдері қауіпсіз Telegram арқылы өңделеді.\n"
-            "• <b>Уақытша файлдар:</b> өңделген барлық әндер мен вокал/минустар чатқа жіберілген бойда серверден өшіріледі.\n"
-            "• <b>Деректерді өшіру:</b> жеке деректеріңізді толық өшіру құқығыңыз бар. Ол үшін қолдауға жазыңыз: @youtubestanmanager.\n\n"
-            "📄 <i>Біз сіздің деректеріңізді үшінші тұлғаларға немесе жарнама желілеріне ешқашан сатпаймыз.</i>"
+            "🔒 <b>SunoSaver Құпиялылық және қызмет көрсету саясаты</b>\n\n"
+            "<b>1. Деректер құпиялылығы:</b>\n"
+            "• Біз тек сандық Telegram ID, username, тіл, кітапхана және Fair Use лимиттерінің есептегіштерін ғана сақтаймыз.\n"
+            "• Бот жеке хаттарға, банк карталарына немесе Suno аккаунттарына кіре алмайды. Stars төлемдері қауіпсіз Telegram арқылы өңделеді.\n"
+            "• Өңделген файлдар чатқа жіберілгеннен кейін серверден бірден өшіріледі.\n\n"
+            "<b>2. Реферал жүйесі және PRO мәртебесі:</b>\n"
+            "• Тек ботты бұрын ешқашан іске қоспаған <b>жаңа қолданушылар</b> ғана есептеледі.\n"
+            "• Қайта кірулер және жасанды бұрмалау әрекеттері антифрод жүйесімен автоматты түрде қабылданбайды.\n"
+            "• Техникалық сұрақтар қолдау қызметі (@youtubestanmanager) арқылы қарапайым тәртіппен тексеріледі.\n\n"
+            "<b>3. Қолдау қызметімен сөйлесу этикасы:</b>\n"
+            "• Сервис тегін ұсынылады. Қолдау қызметімен байланыс сыйластықпен жүргізілуі тиіс.\n"
+            "• Қоқан-лоққы, бопсалау, қорлау және ультиматум қоюға <b>қатаң тыйым салынады</b>.\n"
+            "• Дөрекілік танытқан қолданушылар бірден <b>мәңгілік бұғатталады (/ban)</b> және қызмет көрсетілмейді.\n\n"
+            "📄 <i>Ботты пайдалану арқылы сіз осы ережелермен толықтай келісесіз.</i>"
         ),
         "settings":      "⚙️ <b>Интерфейс баптаулары</b>\n\nТілді таңдаңыз:",
         "lang_changed":  "✅ Тіл <b>Қазақ тіліне</b> ауыстырылды!",
@@ -959,7 +982,8 @@ TEXTS = {
             "✅ Бір микске 10 әнге дейін қосу\n"
             "✅ Шектеусіз студиялық WAV (30-50 МБ)\n"
             "✅ Басымдықты жоғары жылдамдық\n\n"
-            "🔗 <b>Достарды шақыру сілтемеңіз:</b>\n<code>{ref_url}</code>"
+            "🔗 <b>Достарды шақыру сілтемеңіз:</b>\n<code>{ref_url}</code>\n\n"
+            "📌 <i>Ереже: тек жаңа қолданушылар есептеледі. Қолдауға дөрекілік, бопсалау немесе накрутка үшін — аккаунт мәңгіге бұғатталады (/privacy).</i>"
         ),
         "limit_downloads_reached": (
             "⚠️ <b>Күндік шектеу таусылды!</b>\n\n"
