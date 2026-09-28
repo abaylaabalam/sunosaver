@@ -110,24 +110,35 @@ async function activateLicenseKey(key) {
     return { success: true, message: "PRO activated successfully!" };
   }
 
-  // Lemon Squeezy License Validation API
+  // Gumroad License Validation API
+  const GUMROAD_PRODUCT_ID = "FhscSj66jYwOaEKgBqu8qQ==";
+
   try {
-    const resp = await fetch("https://api.lemonsqueezy.com/v1/licenses/validate", {
+    const resp = await fetch("https://api.gumroad.com/v2/licenses/verify", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ license_key: cleanKey })
+      body: new URLSearchParams({
+        product_id: GUMROAD_PRODUCT_ID,
+        license_key: cleanKey,
+        increment_uses_count: "true"
+      })
     });
 
-    if (!resp.ok) {
-      throw new Error(`Validation server returned HTTP ${resp.status}`);
-    }
-
     const data = await resp.json();
-    if (data.valid) {
+    if (data && data.success) {
+      if (data.purchase && data.purchase.refunded) {
+        throw new Error("This license has been refunded.");
+      }
+      if (data.purchase && data.purchase.chargebacked) {
+        throw new Error("This license has been chargebacked.");
+      }
+      if (data.purchase && data.purchase.subscription_cancelled_at && data.purchase.subscription_failed_at) {
+        throw new Error("This subscription has expired or was cancelled.");
+      }
       await chrome.storage.sync.set({ isPro: true, licenseKey: cleanKey });
       return { success: true, message: "PRO activated successfully!" };
     } else {
-      throw new Error(data.error || "Invalid or expired license key.");
+      throw new Error((data && data.message) || "Invalid or inactive license key.");
     }
   } catch (err) {
     throw new Error(err.message || "License validation failed. Please check your internet connection.");
